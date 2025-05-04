@@ -1,0 +1,2 @@
+[console_scripts]
+dirac-wallet = dirac.__main__:main
