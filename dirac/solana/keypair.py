@@ -6,6 +6,9 @@ import base64
 import hashlib
 from typing import Dict, Any, Optional, Tuple
 
+# Import quantum algorithms
+from quantum_hash import DiracHash, QuantumEnhancedHash
+
 try:
     import base58
     from solders.keypair import Keypair
@@ -37,9 +40,14 @@ def convert_to_solana_keypair(private_key: Dict[str, Any]) -> Optional[object]:
     
     try:
         # The seed needs to be exactly 32 bytes for Solana keypairs
-        # We'll use a SHA256 hash of the seed if it's not already 32 bytes
+        # Use DiracHash to derive a deterministic 32-byte seed
         if len(seed) != 32:
-            seed = hashlib.sha256(seed).digest()
+            # Use the algorithm specified in the private key or default to grover
+            algorithm = private_key.get("algorithm", "grover")
+            if algorithm not in ["standard", "improved", "grover", "shor"]:
+                algorithm = "grover"
+                
+            seed = DiracHash.hash(seed, algorithm=algorithm, digest_size=32)
         
         # Construct a Solana keypair from the seed
         keypair = Keypair.from_bytes(seed)
@@ -101,9 +109,9 @@ def get_pubkey_from_bytes(key_bytes: bytes) -> Optional[object]:
         return None
     
     try:
-        # Ensure we have exactly 32 bytes
+        # Ensure we have exactly 32 bytes using QuantumEnhancedHash
         if len(key_bytes) != 32:
-            key_bytes = hashlib.sha256(key_bytes).digest()
+            key_bytes = QuantumEnhancedHash.hash(key_bytes, digest_size=32)
         
         pubkey = Pubkey.from_bytes(key_bytes)
         return pubkey

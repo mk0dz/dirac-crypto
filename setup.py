@@ -7,11 +7,13 @@ setup(
     install_requires=[
         "solana>=0.29.2",
         "solders>=0.18.1",
+        "dirac-hashes>=0.1.4",
         "typer>=0.9.0",
         "rich>=13.4.2",
         "matplotlib>=3.7.1",
         "pandas>=2.0.2",
         "base58>=2.1.0",
+        "asyncio>=3.4.3",
     ],
     entry_points={
         "console_scripts": [

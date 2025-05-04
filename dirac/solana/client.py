@@ -4,14 +4,16 @@ Solana client wrapper with enhanced functionality.
 
 from typing import Dict, Any, Optional, Union, List
 import time
+import base58
 
-from dirac.solana.keypair import convert_to_solana_keypair, keypair_to_base58
+from dirac.solana.keypair import convert_to_solana_keypair, keypair_to_base58, get_pubkey_from_bytes
 
 try:
     from solana.rpc.api import Client
     from solana.rpc.types import TxOpts
     from solders.keypair import Keypair
     from solders.pubkey import Pubkey
+    import asyncio
     SOLANA_AVAILABLE = True
 except ImportError:
     SOLANA_AVAILABLE = False
@@ -19,6 +21,7 @@ except ImportError:
     TxOpts = None
     Keypair = None
     Pubkey = None
+    asyncio = None
 
 class SolanaClient:
     """Enhanced Solana client with additional functionality."""
@@ -115,40 +118,90 @@ class SolanaClient:
             Transaction signature or None if failed
         """
         if not self.is_available() or self.network not in ["testnet", "devnet", "local"]:
+            print(f"Airdrop not available for network: {self.network}")
             return None
         
         try:
+            # Limit the amount to request based on network
+            # Testnet typically allows 1 SOL max per request
+            if self.network == "testnet" and amount_sol > 1.0:
+                print(f"Warning: Testnet airdrop amount limited to 1 SOL (requested {amount_sol})")
+                amount_sol = 1.0
+            
+            # Devnet allows larger amounts but let's cap it
+            if self.network == "devnet" and amount_sol > 5.0:
+                print(f"Warning: Devnet airdrop amount limited to 5 SOL (requested {amount_sol})")
+                amount_sol = 5.0
+                
             # Convert SOL to lamports
             lamports = int(amount_sol * 1_000_000_000)
             
             # Convert string address to Pubkey
-            pubkey = self._get_pubkey_from_address(address)
+            pubkey = None
+            if isinstance(address, str):
+                # Try to decode as a base58 string first
+                try:
+                    if address.startswith("0x"):
+                        # Strip 0x prefix if present
+                        address = address[2:]
+                    # Convert to Pubkey object
+                    pubkey = Pubkey.from_string(address)
+                except Exception:
+                    # If that fails, try to get Pubkey using get_pubkey_from_address
+                    pubkey = self._get_pubkey_from_address(address)
+            
             if pubkey is None:
                 print(f"Error: Could not convert address {address} to Pubkey")
                 return None
-                
-            # Request airdrop
-            response = self.client.request_airdrop(pubkey, lamports)
             
-            # Extract transaction signature based on response type
+            # Try async version first, then fall back to sync for compatibility
             try:
-                # For newer versions where response is a RequestAirdropResp object
-                tx_sig = str(response.value)
-            except (AttributeError, TypeError):
+                loop = asyncio.get_event_loop()
+                if not loop.is_running():
+                    tx_sig = loop.run_until_complete(self._async_request_airdrop(pubkey, lamports))
+                else:
+                    # If we're already in an event loop, create a new one for this task
+                    tx_sig = asyncio.run(self._async_request_airdrop(pubkey, lamports))
+            except Exception as e:
+                print(f"Async airdrop failed, trying sync version: {str(e)}")
+                # Request airdrop using synchronous API
+                response = self.client.request_airdrop(pubkey, lamports)
+                
+                # Extract transaction signature based on response type
                 try:
-                    # Fall back to dictionary access for older versions
-                    tx_sig = response["result"]
-                except (KeyError, TypeError):
-                    print(f"Error: Unexpected airdrop response format: {response}")
-                    return None
+                    # For newer versions where response is a RequestAirdropResp object
+                    tx_sig = str(response.value)
+                except (AttributeError, TypeError):
+                    try:
+                        # Fall back to dictionary access for older versions
+                        tx_sig = response["result"]
+                    except (KeyError, TypeError):
+                        print(f"Error: Unexpected airdrop response format: {response}")
+                        return None
             
             # Wait for confirmation
-            self._confirm_transaction(tx_sig)
-            
-            return tx_sig
+            if self._confirm_transaction(tx_sig):
+                print(f"Airdrop successful: {tx_sig}")
+                return tx_sig
+            else:
+                print(f"Airdrop timed out or failed to confirm: {tx_sig}")
+                return tx_sig  # Return the signature anyway in case it confirms later
+                
         except Exception as e:
             print(f"Airdrop error: {str(e)}")
             return None
+    
+    async def _async_request_airdrop(self, pubkey, lamports):
+        """Async version of airdrop request for newer solana-py versions."""
+        if asyncio is None:
+            raise ImportError("asyncio is not available")
+            
+        response = await self.client.request_airdrop_async(pubkey, lamports)
+        
+        # Extract transaction signature
+        if hasattr(response, 'value'):
+            return str(response.value)
+        return response["result"]
     
     def _confirm_transaction(self, tx_sig: str, max_retries: int = 30) -> bool:
         """
@@ -209,15 +262,33 @@ class SolanaClient:
             if pubkey is None:
                 return []
             
+            # Get signatures for address
             response = self.client.get_signatures_for_address(pubkey, limit=limit)
             
-            # Handle different response formats
+            # Process based on response format
             try:
                 # For newer versions
-                return [tx.__dict__ for tx in response.value]
+                transactions = response.value
+                result = []
+                
+                for tx in transactions:
+                    # Convert transaction object to dictionary
+                    tx_dict = {
+                        "signature": str(tx.signature),
+                        "slot": tx.slot,
+                        "err": tx.err is not None,
+                        "memo": None,
+                        "block_time": tx.block_time
+                    }
+                    result.append(tx_dict)
+                
+                return result
             except (AttributeError, TypeError):
                 # Fall back to dictionary access for older versions
-                return response["result"]
+                try:
+                    return response["result"]
+                except (KeyError, TypeError):
+                    return []
         except Exception as e:
             print(f"Transaction history error: {str(e)}")
             return []
@@ -227,16 +298,35 @@ class SolanaClient:
         Convert a string address to a Solana Pubkey object.
         
         Args:
-            address: Solana wallet address as a string
+            address: Base58 encoded Solana address
             
         Returns:
             Pubkey object or None if conversion fails
         """
         if not SOLANA_AVAILABLE or Pubkey is None:
             return None
-            
+        
         try:
-            return Pubkey.from_string(address)
+            # If it's already a valid Pubkey string, convert directly
+            try:
+                return Pubkey.from_string(address)
+            except:
+                pass
+                
+            # If we have base58 available, try decoding the address
+            if base58 is not None:
+                try:
+                    # Decode base58 string to bytes
+                    decoded = base58.b58decode(address)
+                    
+                    # Ensure we have 32 bytes
+                    if len(decoded) == 32:
+                        return Pubkey.from_bytes(decoded)
+                except:
+                    pass
+            
+            # Fall back to helper function if direct conversion fails
+            return get_pubkey_from_bytes(address.encode('utf-8'))
         except Exception as e:
-            print(f"Pubkey conversion error: {str(e)}")
+            print(f"Address conversion error: {str(e)}")
             return None 

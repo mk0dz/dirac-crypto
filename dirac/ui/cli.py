@@ -35,14 +35,37 @@ def create_app():
     @app.command("create")
     def create_wallet(
         name: str,
-        sig_algo: str = typer.Option("sphincs", "--sig-algo", help="Signature algorithm"),
-        hash_algo: str = typer.Option("sha256", "--hash-algo", help="Hash algorithm"),
-        security: int = typer.Option(3, "--security", help="Security level (1-5)"),
-        backup: bool = typer.Option(True, "--backup/--no-backup", help="Generate backup keys"),
-        force: bool = typer.Option(False, "--force", help="Overwrite existing wallet"),
-        network: str = typer.Option("testnet", "--network", help="Network (mainnet, testnet, devnet, local)")
+        sig_algo: str = typer.Option("sphincs", "--sig-algo", "-s", 
+                                     help="Signature algorithm (sphincs, lamport, dilithium)"),
+        hash_algo: str = typer.Option("grover", "--hash-algo", "-h", 
+                                     help="Hash algorithm (standard, improved, grover, shor, quantum)"),
+        security: int = typer.Option(3, "--security", "-l", 
+                                    help="Security level (1-5)"),
+        backup: bool = typer.Option(True, "--backup/--no-backup", 
+                                    help="Generate backup keys"),
+        force: bool = typer.Option(False, "--force", "-f", 
+                                  help="Overwrite existing wallet"),
+        network: str = typer.Option("testnet", "--network", "-n", 
+                                   help="Network (mainnet, testnet, devnet, local)")
     ):
-        """Create a new wallet."""
+        """Create a new wallet with quantum-resistant algorithms."""
+        
+        # Validate algorithm choices
+        valid_sig_algos = ["sphincs", "lamport", "dilithium"]
+        valid_hash_algos = ["standard", "improved", "grover", "shor", "quantum"]
+        
+        if sig_algo not in valid_sig_algos:
+            console.print(f"[bold red]Error:[/] Invalid signature algorithm. Valid options: {', '.join(valid_sig_algos)}")
+            return
+            
+        if hash_algo not in valid_hash_algos:
+            console.print(f"[bold red]Error:[/] Invalid hash algorithm. Valid options: {', '.join(valid_hash_algos)}")
+            return
+            
+        if security < 1 or security > 5:
+            console.print(f"[bold red]Error:[/] Security level must be between 1 and 5")
+            return
+        
         try:
             # Initialize keyring with chosen algorithms
             keyring = QuantumKeyring(
