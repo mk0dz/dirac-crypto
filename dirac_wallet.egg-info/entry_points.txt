@@ -1,2 +1,2 @@
 [console_scripts]
-dirac-wallet = dirac.__main__:main
+dirac-wallet = dirac_wallet.cli.commands:cli

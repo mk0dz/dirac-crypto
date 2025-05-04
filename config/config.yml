@@ -1,0 +1,28 @@
+# Dirac-Wallet Configuration
+
+network:
+  # Solana network configuration
+  testnet_url: "https://api.testnet.solana.com"
+  devnet_url: "https://api.devnet.solana.com"
+  default_network: "testnet"  # or "devnet"
+  
+quantum:
+  # Quantum signature settings
+  signature_scheme: "dilithium"
+  security_level: 3  # Dilithium security level (2, 3, or 5)
+  
+wallet:
+  # Wallet storage settings
+  default_path: "~/.dirac_wallet"
+  encrypt_storage: true
+  key_derivation_rounds: 100000  # PBKDF2 rounds
+  
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  file: "dirac_wallet.log"
+  
+# Advanced settings (usually don't need to change)
+advanced:
+  transaction_timeout: 60  # seconds
+  max_retries: 3
+  confirmation_blocks: 32
