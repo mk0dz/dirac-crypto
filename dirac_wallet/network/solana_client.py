@@ -3,11 +3,13 @@ Solana network client for quantum-resistant transactions
 """
 import json
 import asyncio
-from typing import Dict, Optional, Tuple
+import aiohttp
+from typing import Dict, Optional, Tuple, List, Any
 from solana.rpc.async_api import AsyncClient
 from solana.rpc.core import RPCException
 from solders.transaction import Transaction
 from solders.hash import Hash
+from solders.pubkey import Pubkey
 from decimal import Decimal
 
 from ..utils.logger import logger
@@ -19,32 +21,88 @@ class QuantumSolanaClient:
     Supports quantum-resistant transaction signing.
     """
     
-    def __init__(self, network: str = "testnet", rpc_url: str = None):
-        """Initialize Solana client"""
+    # RPC endpoints for different networks with fallbacks
+    RPC_ENDPOINTS = {
+        "devnet": [
+            "https://api.devnet.solana.com",
+            "https://devnet.solana.com",
+            "https://rpc-devnet.helius.xyz",
+            "https://devnet.genesysgo.net"
+        ],
+        "testnet": [
+            "https://api.testnet.solana.com",
+            "https://testnet.solana.com"
+        ],
+        "mainnet": [
+            "https://api.mainnet-beta.solana.com",
+            "https://solana-api.projectserum.com"
+        ]
+    }
+    
+    def __init__(self, network: str = "devnet", endpoint: str = None):
+        """
+        Initialize Solana client
+        
+        Args:
+            network: Solana network (devnet, testnet, mainnet)
+            endpoint: Custom RPC endpoint URL (optional)
+        """
         self.network = network
-        
-        # Default RPC endpoints
-        self.network_urls = {
-            "testnet": "https://api.testnet.solana.com",
-            "devnet": "https://api.devnet.solana.com",
-            "mainnet": "https://api.mainnet-beta.solana.com",
-        }
-        
-        self.rpc_url = rpc_url or self.network_urls.get(network, self.network_urls["testnet"])
         self.client = None
+        self.current_endpoint = endpoint
+        self.current_endpoint_index = 0
         
         logger.info(f"Initialized QuantumSolanaClient for {network}")
     
-    async def connect(self):
-        """Connect to Solana RPC"""
+    async def connect(self) -> bool:
+        """Connect to Solana RPC endpoint with fallback support"""
         try:
-            self.client = AsyncClient(self.rpc_url)
-            connection_status = await self.client.is_connected()
-            logger.info(f"Connected to Solana {self.network}: {connection_status}")
-            return connection_status
+            # Close any existing client
+            if self.client:
+                await self.client.close()
+                self.client = None
+            
+            # If custom endpoint provided, use it
+            if self.current_endpoint:
+                endpoint = self.current_endpoint
+            else:
+                # Otherwise use the current endpoint from the list for the network
+                endpoints = self.RPC_ENDPOINTS.get(self.network, [])
+                if not endpoints:
+                    raise ValueError(f"No RPC endpoints available for network: {self.network}")
+                
+                endpoint = endpoints[self.current_endpoint_index]
+            
+            # Create a new client and connect
+            self.client = AsyncClient(endpoint)
+            
+            # Test the connection
+            version = await self.client.get_version()
+            is_connected = version is not None
+            
+            logger.info(f"Connected to Solana {self.network}: {is_connected}")
+            return is_connected
+            
         except Exception as e:
-            logger.error(f"Failed to connect to Solana: {str(e)}")
-            raise
+            logger.error(f"Failed to connect to Solana {self.network}: {str(e)}")
+            self.client = None
+            return False
+    
+    async def try_next_endpoint(self) -> bool:
+        """Try the next available RPC endpoint"""
+        # If using a custom endpoint, we don't have fallbacks
+        if self.current_endpoint:
+            return False
+            
+        endpoints = self.RPC_ENDPOINTS.get(self.network, [])
+        if not endpoints:
+            return False
+            
+        # Move to the next endpoint in the list
+        self.current_endpoint_index = (self.current_endpoint_index + 1) % len(endpoints)
+        
+        # Try to connect to the new endpoint
+        return await self.connect()
     
     async def disconnect(self):
         """Disconnect from Solana RPC"""
@@ -61,7 +119,10 @@ class QuantumSolanaClient:
             if not self.client:
                 await self.connect()
             
-            response = await self.client.get_balance(address)
+            # Convert string address to Pubkey object
+            pubkey = Pubkey.from_string(address)
+            
+            response = await self.client.get_balance(pubkey)
             
             if response.value is not None:
                 # Convert lamports to SOL
@@ -189,24 +250,194 @@ class QuantumSolanaClient:
             raise
     
     async def request_airdrop(self, address: str, amount_sol: float = 1.0) -> Optional[str]:
-        """Request SOL airdrop on testnet/devnet"""
-        try:
-            if self.network == "mainnet":
-                raise ValueError("Airdrop not available on mainnet")
+        """Request SOL airdrop on testnet/devnet with automatic retry on different endpoints"""
+        if self.network == "mainnet":
+            raise ValueError("Airdrop not available on mainnet")
+        
+        # Number of endpoints to try before giving up
+        max_tries = len(self.RPC_ENDPOINTS.get(self.network, []))
+        if max_tries == 0:
+            max_tries = 1
             
-            if not self.client:
-                await self.connect()
-            
-            lamports = int(amount_sol * 10**9)
-            response = await self.client.request_airdrop(address, lamports)
-            
-            if response.value:
-                tx_id = str(response.value)
-                logger.info(f"Airdrop requested: {tx_id}")
-                return tx_id
-            else:
-                raise ValueError("Airdrop request failed")
+        tries = 0
+        last_error = None
+        
+        while tries < max_tries:
+            try:
+                if not self.client:
+                    await self.connect()
                 
+                # Convert string address to Pubkey object
+                pubkey = Pubkey.from_string(address)
+                
+                lamports = int(amount_sol * 10**9)
+                
+                # Detailed debugging before the request
+                logger.debug(f"Try #{tries+1}: Requesting airdrop: address={pubkey}, lamports={lamports}, network={self.network}")
+                
+                try:
+                    # Set longer timeout for airdrop request
+                    response = await asyncio.wait_for(
+                        self.client.request_airdrop(pubkey, lamports),
+                        timeout=30.0
+                    )
+                    
+                    # Log raw response for debugging
+                    logger.debug(f"Raw airdrop response: {response}")
+                    
+                    if hasattr(response, 'value') and response.value:
+                        tx_id = str(response.value)
+                        logger.info(f"Airdrop requested: {tx_id}")
+                        return tx_id
+                    else:
+                        error_msg = f"Airdrop request returned invalid response: {response}"
+                        logger.error(error_msg)
+                        last_error = ValueError(error_msg)
+                        
+                except asyncio.TimeoutError:
+                    error_msg = "Airdrop request timed out. The network may be congested."
+                    logger.error(error_msg)
+                    last_error = ValueError(error_msg)
+                    
+                except RPCException as rpc_err:
+                    # Catch specific RPC exceptions from the Solana client
+                    error_msg = f"RPC error during airdrop request: {str(rpc_err)}"
+                    logger.error(error_msg)
+                    
+                    if "429" in str(rpc_err):
+                        last_error = ValueError("Rate limit exceeded. Please try again later.")
+                    elif "exceeds max allowed amount" in str(rpc_err).lower():
+                        # Don't retry for amount errors
+                        raise ValueError("Requested amount exceeds maximum allowed airdrop amount.")
+                    else:
+                        last_error = ValueError(f"Airdrop failed: {str(rpc_err)}")
+                
+                except Exception as e:
+                    error_msg = f"Unexpected error during airdrop request: {str(e)}, {type(e)}"
+                    logger.error(error_msg)
+                    last_error = ValueError(error_msg)
+                    
+                # If we got here, the request failed. Try the next endpoint
+                success = await self.try_next_endpoint()
+                if not success:
+                    logger.error("Failed to connect to next endpoint")
+                    break
+                    
+                tries += 1
+                    
+            except Exception as e:
+                if "exceeds max allowed amount" in str(e).lower():
+                    # Don't retry for specific errors
+                    raise
+                    
+                error_msg = f"Failed to request airdrop: {str(e)}"
+                logger.error(error_msg)
+                last_error = ValueError(error_msg)
+                
+                # Try the next endpoint
+                success = await self.try_next_endpoint()
+                if not success:
+                    break
+                    
+                tries += 1
+                
+        # If we've tried all endpoints and still failed, raise the last error
+        if last_error:
+            raise last_error
+        else:
+            raise ValueError("Failed to request airdrop after trying all available endpoints")
+    
+    async def get_airdrop_alternatives(self, address: str) -> Dict[str, str]:
+        """
+        Returns alternative methods to get SOL for test networks
+        when the regular airdrop is not working
+        
+        Args:
+            address: The Solana address to receive SOL
+            
+        Returns:
+            Dictionary of alternative methods with instructions
+        """
+        if self.network not in ["devnet", "testnet"]:
+            return {"error": "Alternative airdrop methods are only available for devnet and testnet"}
+        
+        network_name = self.network.capitalize()
+        
+        alternatives = {
+            "web_faucets": [
+                f"Visit https://faucet.solana.com and request SOL for {network_name}",
+                f"Visit https://solfaucet.com and request SOL for {network_name}",
+                f"Visit https://{self.network}faucet.org and request SOL for your address: {address}"
+            ],
+            "cli_command": f"Run this command in terminal: solana airdrop 2 {address} --url {self.network}",
+            "discord_faucets": "Join Solana discord communities like LamportDAO or The 76 Devs to request SOL from their bots",
+            "address": address,
+            "network": self.network
+        }
+        
+        return alternatives
+    
+    async def request_faucet_airdrop(self, address: str, amount_sol: float = 1.0) -> Dict[str, Any]:
+        """
+        Request an airdrop from SolFaucet.com API
+        This is an alternative to the standard RPC airdrop
+        
+        Args:
+            address: Solana address
+            amount_sol: Amount in SOL (usually limited to 1.0)
+            
+        Returns:
+            Response from the faucet
+        """
+        if self.network not in ["devnet", "testnet"]:
+            return {
+                "success": False,
+                "error": "Faucet airdrop only available for devnet and testnet"
+            }
+            
+        try:
+            faucet_urls = {
+                "devnet": "https://solfaucet.com/api/v1/request",
+                "testnet": "https://solfaucet.com/api/v1/request"
+            }
+            
+            url = faucet_urls.get(self.network)
+            if not url:
+                return {
+                    "success": False,
+                    "error": f"No faucet URL available for {self.network}"
+                }
+                
+            # Prepare the request data
+            data = {
+                "address": address,
+                "network": self.network
+            }
+            
+            logger.info(f"Requesting airdrop from faucet for {address} on {self.network}")
+            
+            # Send the request to the faucet API
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=data, timeout=30) as response:
+                    result = await response.json()
+                    
+                    if response.status == 200:
+                        logger.info(f"Faucet airdrop request successful: {result}")
+                        return {
+                            "success": True,
+                            "response": result
+                        }
+                    else:
+                        logger.error(f"Faucet airdrop request failed: {result}")
+                        return {
+                            "success": False,
+                            "error": f"Faucet error: {result.get('error', 'Unknown error')}"
+                        }
+                        
         except Exception as e:
-            logger.error(f"Failed to request airdrop: {str(e)}")
-            raise
+            error_msg = f"Failed to request airdrop from faucet: {str(e)}"
+            logger.error(error_msg)
+            return {
+                "success": False,
+                "error": error_msg
+            }

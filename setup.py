@@ -12,6 +12,7 @@ setup(
         "pyyaml>=6.0",
         "pycryptodome>=3.17.0",
         "python-dotenv>=1.0.0",
+        "aiohttp>=3.8.0",
     ],
     entry_points={
         "console_scripts": [

@@ -75,13 +75,22 @@ def cli():
 @click.option('--network', '-n', default='testnet', type=click.Choice(['testnet', 'devnet', 'mainnet']), 
               help='Solana network to use')
 @click.option('--path', '-p', help='Path to save wallet file')
-@click.argument('name', required=False, default='default')
+@click.argument('name', required=True)
 def create(network, path, name):
     """Create a new quantum-resistant wallet"""
     try:
         if not path:
-            path = Path.home() / ".dirac_wallet" / f"{name}_{network}.dwf"
+            wallet_dir = Path.home() / ".dirac_wallet"
+            # Ensure wallet directory exists
+            wallet_dir.mkdir(parents=True, exist_ok=True)
+            path = wallet_dir / f"{name}_{network}.dwf"
         
+        # Ensure wallet file doesn't already exist
+        if Path(path).exists():
+            print_error(f"Wallet already exists at {path}")
+            print_info("Use a different name or delete the existing wallet first")
+            return
+            
         wallet = DiracWallet(str(path), network=network)
         
         # Get password
@@ -109,15 +118,31 @@ def create(network, path, name):
 @click.option('--path', '-p', help='Path to wallet file')
 @click.option('--network', '-n', default='testnet', type=click.Choice(['testnet', 'devnet', 'mainnet']), 
               help='Solana network to use')
-@click.argument('name', required=False, default='default')
+@click.argument('name', required=True)
 def balance(path, network, name):
     """Check wallet balance"""
     try:
         if not path:
-            path = Path.home() / ".dirac_wallet" / f"{name}_{network}.dwf"
+            # Try to find the wallet with the specified network first
+            wallet_path = Path.home() / ".dirac_wallet" / f"{name}_{network}.dwf"
+            
+            # If not found, check for other networks if no specific network was specified
+            if not wallet_path.exists():
+                networks = ['testnet', 'devnet', 'mainnet']
+                for net in networks:
+                    alt_path = Path.home() / ".dirac_wallet" / f"{name}_{net}.dwf"
+                    if alt_path.exists():
+                        wallet_path = alt_path
+                        network = net
+                        print_info(f"Found wallet for network: {network}")
+                        break
+            
+            path = wallet_path
         
         if not Path(path).exists():
             print_error(f"Wallet not found at {path}")
+            # Provide helpful hint
+            print_info(f"Try specifying the network with --network option")
             return
         
         wallet = DiracWallet(str(path), network=network)
@@ -154,15 +179,31 @@ def balance(path, network, name):
 @click.option('--path', '-p', help='Path to wallet file')
 @click.option('--network', '-n', default='testnet', type=click.Choice(['testnet', 'devnet', 'mainnet']), 
               help='Solana network to use')
-@click.argument('name', required=False, default='default')
+@click.argument('name', required=True)
 def info(path, network, name):
     """Show wallet information"""
     try:
         if not path:
-            path = Path.home() / ".dirac_wallet" / f"{name}_{network}.dwf"
+            # Try to find the wallet with the specified network first
+            wallet_path = Path.home() / ".dirac_wallet" / f"{name}_{network}.dwf"
+            
+            # If not found, check for other networks if no specific network was specified
+            if not wallet_path.exists():
+                networks = ['testnet', 'devnet', 'mainnet']
+                for net in networks:
+                    alt_path = Path.home() / ".dirac_wallet" / f"{name}_{net}.dwf"
+                    if alt_path.exists():
+                        wallet_path = alt_path
+                        network = net
+                        print_info(f"Found wallet for network: {network}")
+                        break
+            
+            path = wallet_path
         
         if not Path(path).exists():
             print_error(f"Wallet not found at {path}")
+            # Provide helpful hint
+            print_info(f"Try specifying the network with --network option")
             return
         
         wallet = DiracWallet(str(path), network=network)
@@ -182,17 +223,33 @@ def info(path, network, name):
 @click.option('--path', '-p', help='Path to wallet file')
 @click.option('--network', '-n', default='testnet', type=click.Choice(['testnet', 'devnet', 'mainnet']), 
               help='Solana network to use')
-@click.argument('name', required=False, default='default')
+@click.argument('name', required=True)
 @click.argument('recipient', required=True)
 @click.argument('amount', required=True, type=float)
 def send(path, network, name, recipient, amount):
     """Send SOL to another address"""
     try:
         if not path:
-            path = Path.home() / ".dirac_wallet" / f"{name}_{network}.dwf"
+            # Try to find the wallet with the specified network first
+            wallet_path = Path.home() / ".dirac_wallet" / f"{name}_{network}.dwf"
+            
+            # If not found, check for other networks if no specific network was specified
+            if not wallet_path.exists():
+                networks = ['testnet', 'devnet', 'mainnet']
+                for net in networks:
+                    alt_path = Path.home() / ".dirac_wallet" / f"{name}_{net}.dwf"
+                    if alt_path.exists():
+                        wallet_path = alt_path
+                        network = net
+                        print_info(f"Found wallet for network: {network}")
+                        break
+            
+            path = wallet_path
         
         if not Path(path).exists():
             print_error(f"Wallet not found at {path}")
+            # Provide helpful hint
+            print_info(f"Try specifying the network with --network option")
             return
         
         wallet = DiracWallet(str(path), network=network)
@@ -254,20 +311,51 @@ def send(path, network, name, recipient, amount):
 @click.option('--path', '-p', help='Path to wallet file')
 @click.option('--network', '-n', default='devnet', type=click.Choice(['devnet', 'testnet']), 
               help='Solana network to use (airdrop only on devnet/testnet)')
-@click.argument('name', required=False, default='default')
+@click.option('--show-alternatives', '-a', is_flag=True, help='Show alternative ways to get SOL')
+@click.option('--use-faucet', '-f', is_flag=True, help='Use SolFaucet.com instead of RPC airdrop')
+@click.argument('name', required=True)
 @click.argument('amount', required=False, type=float, default=1.0)
-def airdrop(path, network, name, amount):
-    """Request SOL airdrop (devnet/testnet only)"""
+def airdrop(path, network, show_alternatives, use_faucet, name, amount):
+    """Request SOL airdrop (devnet/testnet only)
+    
+    Examples:
+      dirac-wallet airdrop my_wallet            # Request 1 SOL on devnet
+      dirac-wallet airdrop my_wallet 2.0        # Request 2 SOL on devnet
+      dirac-wallet airdrop my_wallet --network testnet  # Request on testnet
+      dirac-wallet airdrop my_wallet -a         # Show alternative SOL sources
+      dirac-wallet airdrop my_wallet -f         # Try faucet API directly
+      
+    Note:
+      If regular airdrop fails, the command will automatically try alternative methods.
+      Some networks have rate limits or may restrict airdrops. In that case, use -a to
+      see other ways to get SOL.
+    """
     try:
         if network == 'mainnet':
             print_error("Airdrop not available on mainnet")
             return
             
         if not path:
-            path = Path.home() / ".dirac_wallet" / f"{name}_{network}.dwf"
+            # Try to find the wallet with the specified network first
+            wallet_path = Path.home() / ".dirac_wallet" / f"{name}_{network}.dwf"
+            
+            # If not found, check for other networks if no specific network was specified
+            if not wallet_path.exists():
+                networks = ['devnet', 'testnet']
+                for net in networks:
+                    alt_path = Path.home() / ".dirac_wallet" / f"{name}_{net}.dwf"
+                    if alt_path.exists():
+                        wallet_path = alt_path
+                        network = net
+                        print_info(f"Found wallet for network: {network}")
+                        break
+            
+            path = wallet_path
         
         if not Path(path).exists():
             print_error(f"Wallet not found at {path}")
+            # Provide helpful hint
+            print_info(f"Try specifying the network with --network option")
             return
         
         wallet = DiracWallet(str(path), network=network)
@@ -278,26 +366,207 @@ def airdrop(path, network, name, amount):
                 client = QuantumSolanaClient(network=network)
                 try:
                     await client.connect()
-                    print_info(f"Requesting {amount} SOL airdrop...")
                     
-                    tx_id = await client.request_airdrop(wallet.solana_address, amount)
-                    print_info(f"Airdrop request submitted: {tx_id}")
+                    # If user requests alternatives directly, show them
+                    if show_alternatives:
+                        alternatives = await client.get_airdrop_alternatives(wallet.solana_address)
+                        return {"alternatives": alternatives}
                     
-                    print_info("Waiting for confirmation...")
-                    status = await client.get_transaction_status(tx_id)
-                    if status.get("confirmed"):
-                        print_success(f"Airdrop confirmed! Added {amount} SOL to your wallet.")
-                    else:
-                        print_error(f"Airdrop status: {status.get('error', 'Unknown error')}")
+                    # If user wants to use faucet directly
+                    if use_faucet:
+                        print_info(f"Requesting {amount} SOL from faucet...")
+                        faucet_result = await client.request_faucet_airdrop(wallet.solana_address, amount)
+                        if faucet_result.get("success"):
+                            print_success(f"Faucet airdrop successful!")
+                            # Check the balance to confirm
+                            try:
+                                await asyncio.sleep(2)  # Wait for confirmation
+                                new_balance = await client.get_balance(wallet.solana_address)
+                                print_info(f"Current balance: {new_balance:.6f} SOL")
+                            except Exception:
+                                pass
+                            return {"success": True}
+                        else:
+                            return {"error": faucet_result.get("error", "Unknown faucet error"), 
+                                    "alternatives": await client.get_airdrop_alternatives(wallet.solana_address)}
+                    
+                    # Try the regular RPC airdrop first
+                    print_info(f"Requesting {amount} SOL airdrop via RPC...")
+                    
+                    try:
+                        tx_id = await client.request_airdrop(wallet.solana_address, amount)
+                        if not tx_id:
+                            return {"error": "Airdrop request failed: No transaction ID returned"}
+                            
+                        print_info(f"Airdrop request submitted: {tx_id}")
+                        
+                        print_info("Waiting for confirmation...")
+                        try:
+                            status = await client.get_transaction_status(tx_id)
+                            if status.get("confirmed"):
+                                print_success(f"Airdrop confirmed! Added {amount} SOL to your wallet.")
+                                # Verify the balance update
+                                try:
+                                    new_balance = await client.get_balance(wallet.solana_address)
+                                    print_info(f"Current balance: {new_balance:.6f} SOL")
+                                except Exception:
+                                    # If we can't get the balance, it's not a critical error
+                                    pass
+                                return {"success": True}
+                            else:
+                                error_msg = status.get('error', 'Unknown error')
+                                print_error(f"RPC airdrop failed: {error_msg}")
+                                
+                                # Try the faucet as fallback
+                                print_info("Trying faucet airdrop as fallback...")
+                                faucet_result = await client.request_faucet_airdrop(wallet.solana_address, amount)
+                                if faucet_result.get("success"):
+                                    print_success(f"Faucet airdrop successful!")
+                                    # Check the balance to confirm
+                                    try:
+                                        await asyncio.sleep(2)  # Wait for confirmation
+                                        new_balance = await client.get_balance(wallet.solana_address)
+                                        print_info(f"Current balance: {new_balance:.6f} SOL")
+                                    except Exception:
+                                        pass
+                                    return {"success": True}
+                                else:
+                                    return {"error": faucet_result.get("error", "Unknown faucet error"), 
+                                            "alternatives": await client.get_airdrop_alternatives(wallet.solana_address)}
+                        except Exception as e:
+                            print_error(f"Error confirming airdrop: {str(e)}")
+                            
+                            # Try the faucet as fallback
+                            print_info("Trying faucet airdrop as fallback...")
+                            faucet_result = await client.request_faucet_airdrop(wallet.solana_address, amount)
+                            if faucet_result.get("success"):
+                                print_success(f"Faucet airdrop successful!")
+                                # Check the balance to confirm
+                                try:
+                                    await asyncio.sleep(2)  # Wait for confirmation
+                                    new_balance = await client.get_balance(wallet.solana_address)
+                                    print_info(f"Current balance: {new_balance:.6f} SOL")
+                                except Exception:
+                                    pass
+                                return {"success": True}
+                            else:
+                                return {"error": faucet_result.get("error", "Unknown faucet error"), 
+                                        "alternatives": await client.get_airdrop_alternatives(wallet.solana_address)}
+                    except ValueError as e:
+                        # Specific errors raised by the client
+                        print_error(f"RPC airdrop failed: {str(e)}")
+                        
+                        # Try the faucet as fallback
+                        print_info("Trying faucet airdrop as fallback...")
+                        faucet_result = await client.request_faucet_airdrop(wallet.solana_address, amount)
+                        if faucet_result.get("success"):
+                            print_success(f"Faucet airdrop successful!")
+                            # Check the balance to confirm
+                            try:
+                                await asyncio.sleep(2)  # Wait for confirmation
+                                new_balance = await client.get_balance(wallet.solana_address)
+                                print_info(f"Current balance: {new_balance:.6f} SOL")
+                            except Exception:
+                                pass
+                            return {"success": True}
+                        else:
+                            return {"error": faucet_result.get("error", "Unknown faucet error"), 
+                                    "alternatives": await client.get_airdrop_alternatives(wallet.solana_address)}
+                    except Exception as e:
+                        print_error(f"RPC airdrop failed: {str(e)}")
+                        
+                        # Try the faucet as fallback
+                        print_info("Trying faucet airdrop as fallback...")
+                        faucet_result = await client.request_faucet_airdrop(wallet.solana_address, amount)
+                        if faucet_result.get("success"):
+                            print_success(f"Faucet airdrop successful!")
+                            # Check the balance to confirm
+                            try:
+                                await asyncio.sleep(2)  # Wait for confirmation
+                                new_balance = await client.get_balance(wallet.solana_address)
+                                print_info(f"Current balance: {new_balance:.6f} SOL")
+                            except Exception:
+                                pass
+                            return {"success": True}
+                        else:
+                            return {"error": faucet_result.get("error", "Unknown faucet error"), 
+                                    "alternatives": await client.get_airdrop_alternatives(wallet.solana_address)}
                     
                 except Exception as e:
-                    return str(e)
+                    return {"error": f"Network connection error: {str(e)}", "alternatives": await client.get_airdrop_alternatives(wallet.solana_address)}
                 finally:
                     await client.disconnect()
             
             result = asyncio.run(request_airdrop())
-            if isinstance(result, str):
-                print_error(f"Failed to request airdrop: {result}")
+            
+            # Handle the result based on the returned dictionary
+            if "error" in result:
+                print_error(result["error"])
+                # Provide helpful tips for specific errors
+                if "429" in result["error"] or "rate limit" in result["error"].lower():
+                    print_info("You've reached the rate limit. Wait a few seconds and try again.")
+                elif "maximum allowed" in result["error"].lower():
+                    print_info("Try requesting a smaller amount (e.g. 1.0 SOL)")
+                
+                # If we have alternatives, display them
+                if "alternatives" in result:
+                    alternatives = result["alternatives"]
+                    print_info("\nAlternative methods to get SOL:")
+                    
+                    # Display web faucets
+                    web_faucets = alternatives.get("web_faucets", [])
+                    if web_faucets:
+                        print_info("\n🌐 Web Faucets:")
+                        for faucet in web_faucets:
+                            console.print(f"  • {faucet}", style="blue")
+                    
+                    # Display CLI command
+                    cli_command = alternatives.get("cli_command")
+                    if cli_command:
+                        print_info("\n💻 Command Line:")
+                        console.print(f"  • {cli_command}", style="blue")
+                    
+                    # Display Discord faucets
+                    discord_faucets = alternatives.get("discord_faucets")
+                    if discord_faucets:
+                        print_info("\n🎮 Discord Communities:")
+                        console.print(f"  • {discord_faucets}", style="blue")
+                    
+                    # Display wallet address for convenience
+                    address = alternatives.get("address")
+                    if address:
+                        print_info("\n📋 Your wallet address (for copying):")
+                        console.print(f"  {address}", style="green")
+            
+            # If alternatives were directly requested
+            elif "alternatives" in result:
+                alternatives = result["alternatives"]
+                print_info(f"\nAlternative methods to get SOL on {network}:")
+                
+                # Display web faucets
+                web_faucets = alternatives.get("web_faucets", [])
+                if web_faucets:
+                    print_info("\n🌐 Web Faucets:")
+                    for faucet in web_faucets:
+                        console.print(f"  • {faucet}", style="blue")
+                
+                # Display CLI command
+                cli_command = alternatives.get("cli_command")
+                if cli_command:
+                    print_info("\n💻 Command Line:")
+                    console.print(f"  • {cli_command}", style="blue")
+                
+                # Display Discord faucets
+                discord_faucets = alternatives.get("discord_faucets")
+                if discord_faucets:
+                    print_info("\n🎮 Discord Communities:")
+                    console.print(f"  • {discord_faucets}", style="blue")
+                
+                # Display wallet address for convenience
+                address = alternatives.get("address")
+                if address:
+                    print_info("\n📋 Your wallet address (for copying):")
+                    console.print(f"  {address}", style="green")
                 
         else:
             print_error("Failed to unlock wallet")
@@ -306,7 +575,7 @@ def airdrop(path, network, name, amount):
         print_error(f"Error: {str(e)}")
 
 
-@cli.command()
+@cli.command(name="list-wallets")
 @click.option('--network', '-n', help='Show wallets for specific network')
 def list_wallets(network):
     """List all available wallets"""
@@ -316,9 +585,7 @@ def list_wallets(network):
             print_info("No wallets found")
             return
         
-        wallet_files = []
-        for file in wallet_dir.glob("*.dwf"):
-            wallet_files.append(file)
+        wallet_files = list(wallet_dir.glob("*.dwf"))
         
         if not wallet_files:
             print_info("No wallets found")
@@ -330,14 +597,34 @@ def list_wallets(network):
         table.add_column("Path", style="white")
         
         for file in wallet_files:
-            parts = file.stem.split('_')
-            if len(parts) >= 2:
-                name = parts[0]
-                net = parts[1]
-                if network is None or net == network:
-                    table.add_row(name, net, str(file))
+            # Extract name and network from filename (name_network.dwf)
+            filename = file.stem
+            
+            if "_" in filename:
+                # Handle the special case where the wallet might have format name_something_network.dwf
+                # Example: my_test_wallet_devnet.dwf
+                if filename.endswith(("_devnet", "_testnet", "_mainnet")):
+                    network_part = filename.split("_")[-1]
+                    name_part = filename[:-len(network_part)-1]  # Remove _network from the end
+                    table.add_row(name_part, network_part, str(file))
+                else:
+                    # Default parsing for name_network.dwf
+                    parts = filename.split('_')
+                    if len(parts) >= 2:
+                        name = parts[0]
+                        net = parts[1]
+                        table.add_row(name, net, str(file))
+            else:
+                # Handle files without network in the name
+                table.add_row(filename, "unknown", str(file))
         
-        console.print(table)
+        if table.row_count == 0:
+            if network:
+                print_info(f"No wallets found for network: {network}")
+            else:
+                print_info("No wallets found")
+        else:
+            console.print(table)
         
     except Exception as e:
         print_error(f"Error: {str(e)}")
