@@ -191,7 +191,7 @@ class DiracWallet:
             raise ValueError("Wallet not initialized")
         
         info = self.wallet_info.to_dict()
-        info["is_unlocked"] = self.is_unlocked
+        info["is_unlocked"] = self.is_unlocked 
         info["path"] = str(self.wallet_path)
         return info
     
