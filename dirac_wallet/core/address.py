@@ -87,11 +87,20 @@ class AddressDerivation:
         Verify that a Solana address correctly maps to a quantum keypair
         """
         try:
-            # Re-derive the address from the quantum keypair
+            # Re-derive the address from the quantum keypair using the same 
+            # method as in create_quantum_keypair
             from .keys import QuantumKeyManager
             key_manager = QuantumKeyManager(security_level=quantum_keypair.security_level)
             pub_key_bytes = key_manager.get_public_key_bytes(quantum_keypair.public_key)
-            derived_address = AddressDerivation.derive_solana_address(pub_key_bytes)
+            
+            # Create a deterministic seed from the quantum public key
+            hasher = hashlib.sha256()
+            hasher.update(pub_key_bytes)
+            seed = hasher.digest()
+            
+            # Create a Solana keypair from the seed
+            solana_keypair = Keypair.from_seed(seed)
+            derived_address = str(solana_keypair.pubkey())
             
             is_valid = derived_address == solana_address
             logger.debug(f"Address mapping verification: {is_valid}")

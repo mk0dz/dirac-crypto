@@ -1,0 +1,69 @@
+{
+  "key_generation_batch": {
+    "total_time": 4.105426073074341,
+    "avg_time": 0.041054260730743405,
+    "memory_used": 5046272,
+    "memory_per_key": 50462.72,
+    "batch_size": 100
+  },
+  "key_generation_parallel": {
+    "total_time": 2.1107687950134277,
+    "avg_time_per_key": 0.042215375900268554,
+    "num_keys": 50,
+    "max_workers": 4,
+    "memory_used": 1310720,
+    "memory_per_key": 26214.4
+  },
+  "transaction_signing_batch": {
+    "total_time": 0.5110006332397461,
+    "avg_time": 0.010220012664794921,
+    "memory_used": 274432,
+    "memory_per_tx": 5488.64,
+    "num_transactions": 50
+  },
+  "transaction_signing_parallel": {
+    "total_time": 0.5150015354156494,
+    "avg_time_per_tx": 0.010300030708312988,
+    "num_transactions": 50,
+    "max_workers": 4,
+    "memory_used": 131072,
+    "memory_per_tx": 2621.44
+  },
+  "wallet_operations": {
+    "total_operations": 50,
+    "total_time": 0.5112853050231934,
+    "avg_time": 0.010225706100463867,
+    "total_memory": 0,
+    "avg_memory_per_op": 0.0,
+    "operation_metrics": {
+      "info": {
+        "count": 12,
+        "avg_time": 1.146396001180013e-05,
+        "min_time": 5.7220458984375e-06,
+        "max_time": 2.0265579223632812e-05,
+        "avg_memory": 0.0
+      },
+      "unlock": {
+        "count": 14,
+        "avg_time": 0.013429760932922363,
+        "min_time": 2.384185791015625e-07,
+        "max_time": 0.051770687103271484,
+        "avg_memory": 0.0
+      },
+      "sign": {
+        "count": 10,
+        "avg_time": 0.032238340377807616,
+        "min_time": 0.009476900100708008,
+        "max_time": 0.05570054054260254,
+        "avg_memory": 0.0
+      },
+      "lock": {
+        "count": 14,
+        "avg_time": 5.340576171875e-05,
+        "min_time": 3.886222839355469e-05,
+        "max_time": 6.794929504394531e-05,
+        "avg_memory": 0.0
+      }
+    }
+  }
+}

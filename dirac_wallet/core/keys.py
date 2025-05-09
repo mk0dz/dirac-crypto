@@ -4,9 +4,10 @@ Quantum-resistant key generation using Dilithium
 import base64
 import json
 from dataclasses import dataclass
-from typing import Tuple, Dict
+from typing import Tuple, Dict, Optional
 
 from quantum_hash.signatures import DilithiumSignature
+from .secure_storage import SecureStorage
 from ..utils.logger import logger
 
 
@@ -17,25 +18,49 @@ class KeyPair:
     public_key: Dict
     algorithm: str = "dilithium"
     security_level: int = 3
+    _secure_storage: Optional[SecureStorage] = None
                 
     def serialize(self) -> Dict:
         """Serialize keypair to dict for storage"""
-        return {
+        serialized = {
             "algorithm": self.algorithm,
             "security_level": self.security_level,
-            "private_key": self._serialize_key(self.private_key),
             "public_key": self._serialize_key(self.public_key)
         }
+        
+        # Only store encrypted private key if secure storage is available
+        if self._secure_storage:
+            encrypted_private = self._secure_storage.encrypt_data(self.private_key)
+            serialized["encrypted_private_key"] = base64.b64encode(encrypted_private).decode()
+            serialized["salt"] = base64.b64encode(self._secure_storage.get_salt()).decode()
+        else:
+            serialized["private_key"] = self._serialize_key(self.private_key)
+            
+        return serialized
     
     @classmethod
-    def deserialize(cls, data: Dict) -> 'KeyPair':
+    def deserialize(cls, data: Dict, password: Optional[str] = None) -> 'KeyPair':
         """Deserialize keypair from storage format"""
+        if "encrypted_private_key" in data and password:
+            # Decrypt private key
+            salt = base64.b64decode(data["salt"])
+            storage = SecureStorage(password, salt)
+            encrypted_private = base64.b64decode(data["encrypted_private_key"])
+            private_key = storage.decrypt_data(encrypted_private)
+        else:
+            private_key = cls._deserialize_key(data["private_key"])
+            
         return cls(
-            private_key=cls._deserialize_key(data["private_key"]),
+            private_key=private_key,
             public_key=cls._deserialize_key(data["public_key"]),
             algorithm=data["algorithm"],
             security_level=data["security_level"]
         )
+    
+    def set_secure_storage(self, password: str):
+        """Set up secure storage for the private key"""
+        self._secure_storage = SecureStorage(password)
+        logger.info("Secure storage initialized for keypair")
     
     @staticmethod
     def _serialize_key(key: Dict) -> Dict:

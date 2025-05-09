@@ -57,8 +57,12 @@ class TestWallet(unittest.TestCase):
         
         # Try to unlock with wrong password
         wrong_password = "wrong_password"
-        unlock_result = wallet.unlock(wrong_password)
-        self.assertFalse(unlock_result)
+        
+        # Now expect a ValueError to be raised with wrong password
+        with self.assertRaises(ValueError):
+            wallet.unlock(wrong_password)
+            
+        # Verify wallet remains locked
         self.assertFalse(wallet.is_unlocked)
     
     def test_wallet_info(self):

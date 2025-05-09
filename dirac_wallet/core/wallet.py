@@ -114,7 +114,13 @@ class DiracWallet:
                 raise FileNotFoundError(f"Wallet file not found at {self.wallet_path}")
             
             encrypted_data = self.wallet_path.read_bytes()
-            decrypted_data = self.storage.decrypt(encrypted_data, password)
+            try:
+                decrypted_data = self.storage.decrypt(encrypted_data, password)
+            except Exception as e:
+                # Always raise a ValueError for corrupted data or bad password
+                logger.error(f"Tampering detected or invalid password: {str(e)}")
+                raise ValueError("Invalid password or corrupted data") from e
+                
             wallet_data = json.loads(decrypted_data.decode('utf-8'))
             
             # Restore wallet state
@@ -131,6 +137,12 @@ class DiracWallet:
             logger.info(f"Wallet unlocked: {self.solana_address}")
             return True
             
+        except ValueError as ve:
+            # Re-raise ValueErrors to be caught in file tampering tests
+            self.is_unlocked = False
+            self.keypair = None
+            self.solana_keypair = None
+            raise
         except Exception as e:
             logger.error(f"Failed to unlock wallet: {str(e)}")
             # Ensure wallet remains locked on failure
