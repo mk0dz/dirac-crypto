@@ -124,26 +124,11 @@ def balance(path, network, name):
     """Check wallet balance"""
     try:
         if not path:
-            # Try to find the wallet with the specified network first
             wallet_path = Path.home() / ".dirac_wallet" / f"{name}_{network}.dwf"
-            
-            # If not found, check for other networks if no specific network was specified
-            if not wallet_path.exists():
-                networks = ['testnet', 'devnet', 'mainnet']
-                for net in networks:
-                    alt_path = Path.home() / ".dirac_wallet" / f"{name}_{net}.dwf"
-                    if alt_path.exists():
-                        wallet_path = alt_path
-                        network = net
-                        print_info(f"Found wallet for network: {network}")
-                        break
-            
             path = wallet_path
-        
         if not Path(path).exists():
             print_error(f"Wallet not found at {path}")
-            # Provide helpful hint
-            print_info(f"Try specifying the network with --network option")
+            print_info(f"Create or import a wallet for '{name}' on network '{network}'")
             return
         
         wallet = DiracWallet(str(path), network=network)
@@ -185,26 +170,11 @@ def info(path, network, name):
     """Show wallet information"""
     try:
         if not path:
-            # Try to find the wallet with the specified network first
             wallet_path = Path.home() / ".dirac_wallet" / f"{name}_{network}.dwf"
-            
-            # If not found, check for other networks if no specific network was specified
-            if not wallet_path.exists():
-                networks = ['testnet', 'devnet', 'mainnet']
-                for net in networks:
-                    alt_path = Path.home() / ".dirac_wallet" / f"{name}_{net}.dwf"
-                    if alt_path.exists():
-                        wallet_path = alt_path
-                        network = net
-                        print_info(f"Found wallet for network: {network}")
-                        break
-            
             path = wallet_path
-        
         if not Path(path).exists():
             print_error(f"Wallet not found at {path}")
-            # Provide helpful hint
-            print_info(f"Try specifying the network with --network option")
+            print_info(f"Create or import a wallet for '{name}' on network '{network}'")
             return
         
         wallet = DiracWallet(str(path), network=network)
@@ -231,26 +201,11 @@ def send(path, network, name, recipient, amount):
     """Send SOL to another address"""
     try:
         if not path:
-            # Try to find the wallet with the specified network first
             wallet_path = Path.home() / ".dirac_wallet" / f"{name}_{network}.dwf"
-            
-            # If not found, check for other networks if no specific network was specified
-            if not wallet_path.exists():
-                networks = ['testnet', 'devnet', 'mainnet']
-                for net in networks:
-                    alt_path = Path.home() / ".dirac_wallet" / f"{name}_{net}.dwf"
-                    if alt_path.exists():
-                        wallet_path = alt_path
-                        network = net
-                        print_info(f"Found wallet for network: {network}")
-                        break
-            
             path = wallet_path
-        
         if not Path(path).exists():
             print_error(f"Wallet not found at {path}")
-            # Provide helpful hint
-            print_info(f"Try specifying the network with --network option")
+            print_info(f"Create or import a wallet for '{name}' on network '{network}'")
             return
         
         wallet = DiracWallet(str(path), network=network)
@@ -370,26 +325,11 @@ def airdrop(path, network, show_alternatives, use_faucet, name, amount):
             return
             
         if not path:
-            # Try to find the wallet with the specified network first
             wallet_path = Path.home() / ".dirac_wallet" / f"{name}_{network}.dwf"
-            
-            # If not found, check for other networks if no specific network was specified
-            if not wallet_path.exists():
-                networks = ['devnet', 'testnet']
-                for net in networks:
-                    alt_path = Path.home() / ".dirac_wallet" / f"{name}_{net}.dwf"
-                    if alt_path.exists():
-                        wallet_path = alt_path
-                        network = net
-                        print_info(f"Found wallet for network: {network}")
-                        break
-            
             path = wallet_path
-        
         if not Path(path).exists():
             print_error(f"Wallet not found at {path}")
-            # Provide helpful hint
-            print_info(f"Try specifying the network with --network option")
+            print_info(f"Create or import a wallet for '{name}' on network '{network}'")
             return
         
         wallet = DiracWallet(str(path), network=network)
