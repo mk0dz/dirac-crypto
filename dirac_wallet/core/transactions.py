@@ -10,8 +10,9 @@ from solders.message import Message
 from solders.hash import Hash
 from solders.transaction import Transaction
 from solders.keypair import Keypair
-from solders.system_program import transfer, TransferParams
+from solders.system_program import transfer, TransferParams, ID as SYSTEM_PROGRAM_ID
 from decimal import Decimal
+from solders.signature import Signature
 
 from .wallet import DiracWallet
 from ..utils.logger import logger
@@ -38,8 +39,8 @@ class QuantumTransaction:
         """Initialize with a DiracWallet instance"""
         self.wallet = wallet
         self.instructions: List[Instruction] = []
+        self.fee_payer = Pubkey.from_string(wallet.solana_address)
         self.recent_blockhash: Optional[Hash] = None
-        self.fee_payer: Optional[Pubkey] = None
         
         logger.debug("Initialized QuantumTransaction")
     
@@ -48,58 +49,35 @@ class QuantumTransaction:
         self.instructions.append(instruction)
         logger.debug(f"Added instruction to transaction: {instruction.program_id}")
     
-    def create_transfer(self, to_address: str, amount: int) -> 'QuantumTransaction':
-        """Create a SOL transfer transaction"""
-        try:
-            # Get wallet's quantum address as sender
-            sender = Pubkey.from_string(self.wallet.solana_address)
-            
-            # Parse recipient address
-            recipient = Pubkey.from_string(to_address)
-            
-            # Create transfer instruction
-            transfer_instruction = transfer(
-                TransferParams(
-                    from_pubkey=sender,
-                    to_pubkey=recipient,
-                    lamports=amount
-                )
+    def create_transfer(self, recipient: str, amount: int):
+        """Create a transfer instruction"""
+        # Convert recipient to Pubkey
+        recipient_pubkey = Pubkey.from_string(recipient)
+        
+        # Create transfer instruction using system program
+        instruction = transfer(
+            TransferParams(
+                from_pubkey=self.fee_payer,
+                to_pubkey=recipient_pubkey,
+                lamports=amount
             )
-            
-            # Add instruction to transaction
-            self.add_instruction(transfer_instruction)
-            
-            # Set fee payer
-            self.fee_payer = sender
-            
-            logger.info(f"Created transfer transaction: {amount} lamports to {to_address}")
-            return self
-            
-        except Exception as e:
-            logger.error(f"Failed to create transfer transaction: {str(e)}")
-            raise
-    
+        )
+        
+        self.instructions.append(instruction)
+        
     def build_message(self) -> Message:
         """Build transaction message"""
-        try:
-            if not self.instructions:
-                raise ValueError("No instructions in transaction")
+        if not self.recent_blockhash:
+            raise ValueError("Recent blockhash not set")
             
-            if not self.fee_payer:
-                raise ValueError("Fee payer not set")
-            
-            # Create message with instructions
-            message = Message(
-                self.instructions,
-                self.fee_payer
-            )
-            
-            logger.debug("Built transaction message")
-            return message
-            
-        except Exception as e:
-            logger.error(f"Failed to build message: {str(e)}")
-            raise
+        # Create message
+        message = Message.new_with_blockhash(
+            self.instructions,
+            self.fee_payer,
+            self.recent_blockhash
+        )
+        
+        return message
     
     def sign_transaction(self, recent_blockhash: Union[str, Hash] = None) -> TransactionInfo:
         """Sign transaction with quantum-resistant signature"""
@@ -183,30 +161,50 @@ class QuantumTransaction:
         from datetime import datetime
         return datetime.now().isoformat()
     
-    def prepare_for_broadcast(self, recent_blockhash: str) -> Tuple[bytes, Dict]:
-        """
-        Prepare transaction for broadcasting to Solana network
-        Returns: (serialized_transaction, quantum_signature_metadata)
-        """
-        try:
-            # Sign the transaction
-            tx_info = self.sign_transaction(recent_blockhash)
+    def prepare_for_broadcast(self, blockhash: str) -> Tuple[bytes, Dict]:
+        """Prepare transaction for broadcast"""
+        if not self.wallet.is_unlocked:
+            raise ValueError("Wallet must be unlocked to sign transaction")
             
-            # Prepare metadata for off-chain quantum signature verification
-            signature_metadata = {
-                "signature": tx_info.signature,
-                "signature_algorithm": "dilithium",
-                "security_level": self.wallet.keypair.security_level,
-                "public_key": self.wallet.keypair.public_key,
-                "transaction_hash": DiracHash.hash(tx_info.raw_transaction).hex()
-            }
-            
-            logger.info("Transaction prepared for broadcast")
-            return tx_info.raw_transaction, signature_metadata
-            
-        except Exception as e:
-            logger.error(f"Failed to prepare transaction: {str(e)}")
-            raise
+        # Convert blockhash string to Hash object
+        self.recent_blockhash = Hash.from_string(blockhash)
+        
+        # Build message
+        message = self.build_message()
+        
+        # Create transaction
+        transaction = Transaction.new_unsigned(message)
+        
+        # Get message bytes for quantum signing
+        message_bytes = bytes(message)
+        
+        # Sign with quantum signature
+        quantum_signature = self.wallet.sign_message(message_bytes)
+        
+        # Add Solana signature
+        solana_signature = self.wallet.sign_solana_transaction(transaction)
+        transaction.signatures = [solana_signature]
+        
+        # Calculate transaction hash using DiracHash
+        tx_hash = DiracHash.hash(message_bytes, digest_size=32, algorithm="improved")
+        
+        # Prepare metadata with all necessary information
+        metadata = {
+            "signature": quantum_signature,
+            "signature_algorithm": "dilithium",
+            "security_level": 3,
+            "solana_signature": str(solana_signature),
+            "transaction_hash": str(Hash.from_bytes(tx_hash)),
+            "public_key": str(self.wallet.keypair.public_key),
+            "message_hash": str(Hash.from_bytes(DiracHash.hash(message_bytes, digest_size=32, algorithm="improved"))),
+            "blockhash": blockhash,
+            "fee_payer": str(self.fee_payer)
+        }
+        
+        # Serialize transaction with proper format
+        raw_tx = bytes(transaction)
+        
+        return raw_tx, metadata
     
     @staticmethod
     def verify_quantum_signature(
@@ -223,8 +221,9 @@ class QuantumTransaction:
             quantum_signature = signature_metadata["signature"]
             public_key = signature_metadata["public_key"]
             
-            # Hash the transaction
-            tx_hash = DiracHash.hash(raw_transaction, digest_size=32, algorithm="improved")
+            # Extract message from transaction
+            transaction = Transaction.from_bytes(raw_transaction)
+            message_bytes = bytes(transaction.message)
             
             # Verify signature
             if wallet:
@@ -236,7 +235,7 @@ class QuantumTransaction:
                 )
             
             is_valid = key_manager.verify_signature(
-                tx_hash,
+                message_bytes,
                 quantum_signature,
                 public_key
             )

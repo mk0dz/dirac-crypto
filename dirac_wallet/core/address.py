@@ -4,8 +4,7 @@ Address derivation for Dirac-Wallet using quantum-resistant keys
 import hashlib
 import base58
 from typing import Dict
-# Note: We're not actually using Keypair, so we can remove the import
-# from solders.keypair import Keypair
+from solders.keypair import Keypair
 
 from quantum_hash import DiracHash
 from .keys import KeyPair
@@ -53,12 +52,19 @@ class AddressDerivation:
             key_manager = QuantumKeyManager(security_level=keypair.security_level)
             pub_key_bytes = key_manager.get_public_key_bytes(keypair.public_key)
             
-            # Derive Solana address
-            solana_address = AddressDerivation.derive_solana_address(pub_key_bytes)
+            # Create a deterministic seed from the quantum public key
+            hasher = hashlib.sha256()
+            hasher.update(pub_key_bytes)
+            seed = hasher.digest()
+            
+            # Create a Solana keypair from the seed
+            solana_keypair = Keypair.from_seed(seed)
+            solana_address = str(solana_keypair.pubkey())
             
             # Create hybrid keypair info
             hybrid_keypair = {
                 "quantum_keypair": keypair,
+                "solana_keypair": solana_keypair,
                 "solana_address": solana_address,
                 "keypair_info": {
                     "algorithm": keypair.algorithm,

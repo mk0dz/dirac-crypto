@@ -7,6 +7,7 @@ import getpass
 from pathlib import Path
 from typing import Optional, Dict, Union
 from dataclasses import dataclass, asdict
+from solders.signature import Signature
 
 from .keys import QuantumKeyManager, KeyPair
 from .address import AddressDerivation
@@ -44,6 +45,7 @@ class DiracWallet:
         
         # Wallet state
         self.keypair: Optional[KeyPair] = None
+        self.solana_keypair: Optional[Keypair] = None
         self.wallet_info: Optional[WalletInfo] = None
         self.solana_address: Optional[str] = None
         self.is_unlocked: bool = False
@@ -72,6 +74,7 @@ class DiracWallet:
             
             # Create hybrid keypair with Solana address
             hybrid_keypair = AddressDerivation.create_quantum_keypair(self.keypair)
+            self.solana_keypair = hybrid_keypair["solana_keypair"]
             self.solana_address = hybrid_keypair["solana_address"]
             
             # Create wallet info
@@ -117,7 +120,12 @@ class DiracWallet:
             # Restore wallet state
             self.keypair = KeyPair.deserialize(wallet_data["keypair"])
             self.wallet_info = WalletInfo.from_dict(wallet_data["info"])
-            self.solana_address = self.wallet_info.address
+            
+            # Recreate Solana keypair
+            hybrid_keypair = AddressDerivation.create_quantum_keypair(self.keypair)
+            self.solana_keypair = hybrid_keypair["solana_keypair"]
+            self.solana_address = hybrid_keypair["solana_address"]
+            
             self.is_unlocked = True
             
             logger.info(f"Wallet unlocked: {self.solana_address}")
@@ -128,11 +136,13 @@ class DiracWallet:
             # Ensure wallet remains locked on failure
             self.is_unlocked = False
             self.keypair = None
+            self.solana_keypair = None
             return False
     
     def lock(self):
         """Lock the wallet (clear sensitive data from memory)"""
         self.keypair = None
+        self.solana_keypair = None
         self.is_unlocked = False
         logger.info("Wallet locked")
     
@@ -182,6 +192,19 @@ class DiracWallet:
             message = message.encode('utf-8')
         
         signature = self.key_manager.sign_message(message, self.keypair.private_key)
+        return signature
+    
+    def sign_solana_transaction(self, transaction) -> Signature:
+        """Sign a Solana transaction with the Solana keypair"""
+        if not self.is_unlocked:
+            raise ValueError("Wallet is locked")
+        
+        # Get the message bytes
+        message_bytes = bytes(transaction.message)
+        
+        # Sign with Solana keypair
+        signature = self.solana_keypair.sign_message(message_bytes)
+        
         return signature
     
     def verify_signature(self, message: Union[str, bytes], signature: Dict) -> bool:

@@ -11,6 +11,7 @@ from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from rich import box
+from solders.transaction import Transaction
 
 from ..core.wallet import DiracWallet
 from ..core.transactions import QuantumTransaction
@@ -265,31 +266,64 @@ def send(path, network, name, recipient, amount):
                     await client.connect()
                     print_info("Connected to Solana network...")
                     
+                    # Check balance first
+                    balance = await client.get_balance(wallet.solana_address)
+                    if balance < amount:
+                        print_error(f"Insufficient balance: {balance} SOL")
+                        print_info(f"Required: {amount} SOL")
+                        return "Insufficient balance"
+                    
                     # Create transaction
                     tx = QuantumTransaction(wallet)
                     tx.create_transfer(recipient, lamports)
                     
                     # Get recent blockhash
                     blockhash = await client.get_recent_blockhash()
+                    if not blockhash:
+                        print_error("Failed to get recent blockhash")
+                        return "Network error"
                     print_info("Got recent blockhash...")
                     
                     # Sign and prepare transaction
-                    raw_tx, metadata = tx.prepare_for_broadcast(str(blockhash))
-                    print_info("Transaction signed with quantum signature...")
+                    try:
+                        raw_tx, metadata = tx.prepare_for_broadcast(str(blockhash))
+                        print_info("Transaction signed with quantum signature...")
+                    except Exception as e:
+                        print_error(f"Failed to sign transaction: {str(e)}")
+                        return "Signing error"
                     
                     # Submit transaction
-                    result = await client.submit_quantum_transaction(raw_tx, metadata["signature"], metadata)
-                    tx_id = result["transaction_id"]
-                    print_success(f"Transaction submitted!")
-                    print_info(f"Transaction ID: {tx_id}")
-                    
-                    # Wait for confirmation
-                    print_info("Waiting for confirmation...")
-                    status = await client.get_transaction_status(tx_id)
-                    if status.get("confirmed"):
-                        print_success("Transaction confirmed!")
-                    else:
-                        print_error(f"Transaction status: {status.get('error', 'Unknown error')}")
+                    try:
+                        result = await client.submit_quantum_transaction(Transaction.from_bytes(raw_tx))
+                        tx_id = result["signature"]
+                        print_success(f"Transaction submitted!")
+                        print_info(f"Transaction ID: {tx_id}")
+                        
+                        # Wait for confirmation
+                        print_info("Waiting for confirmation...")
+                        confirmed = False
+                        for _ in range(5):  # Try for 5 attempts
+                            status = await client.get_transaction_status(tx_id)
+                            if status.get("confirmed"):
+                                print_success("Transaction confirmed!")
+                                confirmed = True
+                                break
+                            elif status.get("error"):
+                                print_error(f"Transaction failed: {status['error']}")
+                                break
+                            await asyncio.sleep(2)
+                        
+                        if not confirmed:
+                            print_error("Transaction confirmation timed out")
+                            print_info("Check the transaction status later using the transaction ID")
+                        
+                        # Show final balance
+                        new_balance = await client.get_balance(wallet.solana_address)
+                        print_info(f"New balance: {new_balance} SOL")
+                        
+                    except Exception as e:
+                        print_error(f"Failed to submit transaction: {str(e)}")
+                        return "Submission error"
                     
                 except Exception as e:
                     return str(e)

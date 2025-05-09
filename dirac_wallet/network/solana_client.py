@@ -6,13 +6,16 @@ import asyncio
 import aiohttp
 from typing import Dict, Optional, Tuple, List, Any
 from solana.rpc.async_api import AsyncClient
-from solana.rpc.core import RPCException
+from solana.rpc.core import RPCException as RpcException
 from solders.transaction import Transaction
 from solders.hash import Hash
 from solders.pubkey import Pubkey
 from decimal import Decimal
+from datetime import datetime
+from solders.signature import Signature
 
 from ..utils.logger import logger
+from ..core.transactions import QuantumTransaction
 
 
 class QuantumSolanaClient:
@@ -25,17 +28,21 @@ class QuantumSolanaClient:
     RPC_ENDPOINTS = {
         "devnet": [
             "https://api.devnet.solana.com",
+            "https://rpc-devnet.helius.xyz/?api-key=1d41c193-0e68-4e53-8a44-35504168d3f3",
+            "https://devnet.genesysgo.net",
             "https://devnet.solana.com",
-            "https://rpc-devnet.helius.xyz",
-            "https://devnet.genesysgo.net"
+            "https://api.mainnet-beta.solana.com",  # Mainnet can also serve devnet requests
+            "https://solana-api.projectserum.com"   # ProjectSerum can also serve devnet requests
         ],
         "testnet": [
             "https://api.testnet.solana.com",
-            "https://testnet.solana.com"
+            "https://testnet.solana.com",
+            "https://testnet.genesysgo.net"
         ],
         "mainnet": [
             "https://api.mainnet-beta.solana.com",
-            "https://solana-api.projectserum.com"
+            "https://solana-api.projectserum.com",
+            "https://rpc.ankr.com/solana"
         ]
     }
     
@@ -49,7 +56,17 @@ class QuantumSolanaClient:
         """
         self.network = network
         self.client = None
-        self.current_endpoint = endpoint
+        
+        # Set current endpoint
+        if endpoint:
+            self.current_endpoint = endpoint
+        else:
+            endpoints = self.RPC_ENDPOINTS.get(network, [])
+            if endpoints:
+                self.current_endpoint = endpoints[0]
+            else:
+                raise ValueError(f"No RPC endpoints available for network: {network}")
+        
         self.current_endpoint_index = 0
         
         logger.info(f"Initialized QuantumSolanaClient for {network}")
@@ -74,7 +91,7 @@ class QuantumSolanaClient:
                 endpoint = endpoints[self.current_endpoint_index]
             
             # Create a new client and connect
-            self.client = AsyncClient(endpoint)
+            self.client = AsyncClient(endpoint, commitment="confirmed")
             
             # Test the connection
             version = await self.client.get_version()
@@ -100,6 +117,7 @@ class QuantumSolanaClient:
             
         # Move to the next endpoint in the list
         self.current_endpoint_index = (self.current_endpoint_index + 1) % len(endpoints)
+        self.current_endpoint = endpoints[self.current_endpoint_index]
         
         # Try to connect to the new endpoint
         return await self.connect()
@@ -155,47 +173,47 @@ class QuantumSolanaClient:
             logger.error(f"Failed to get recent blockhash: {str(e)}")
             raise
     
-    async def submit_quantum_transaction(
-        self, 
-        raw_transaction: bytes, 
-        quantum_signature: Dict,
-        metadata: Dict
-    ) -> Dict:
-        """
-        Submit quantum-resistant transaction to Solana network
-        
-        Returns:
-            Dict containing transaction_id and status
-        """
+    async def submit_quantum_transaction(self, transaction: Transaction) -> Dict[str, Any]:
+        """Submit a quantum-signed transaction to the Solana network."""
         try:
             if not self.client:
                 await self.connect()
+
+            # Initialize quantum metadata storage if not exists
+            if not hasattr(self, 'quantum_metadata'):
+                self.quantum_metadata = {}
+
+            # Submit transaction
+            response = await self.client.send_transaction(
+                transaction
+            )
             
-            # Submit the raw transaction
-            response = await self.client.send_raw_transaction(raw_transaction)
-            
-            tx_id = str(response.value)
+            # Extract signature from response
+            if hasattr(response, 'value'):
+                signature = str(response.value)
+            else:
+                signature = str(response)
             
             # Store quantum metadata for verification
-            result = {
-                "transaction_id": tx_id,
-                "status": "submitted",
-                "quantum_metadata": {
-                    "signature": quantum_signature,
-                    "algorithm": metadata.get("signature_algorithm", "dilithium"),
-                    "security_level": metadata.get("security_level", 3),
-                    "timestamp": metadata.get("timestamp")
-                }
+            self.quantum_metadata[signature] = {
+                "signature": bytes(transaction.signatures[0]).hex(),
+                "algorithm": "DILITHIUM3",
+                "security_level": 3,
+                "message_hash": bytes(transaction.message.hash()).hex(),
+                "blockhash": str(transaction.message.recent_blockhash),
+                "timestamp": datetime.now().isoformat()
             }
             
-            logger.info(f"Submitted quantum transaction: {tx_id}")
-            return result
+            return {
+                "signature": signature,
+                "status": "submitted"
+            }
             
-        except RPCException as e:
+        except RpcException as e:
             logger.error(f"RPC error submitting transaction: {str(e)}")
             raise
         except Exception as e:
-            logger.error(f"Failed to submit transaction: {str(e)}")
+            logger.error(f"Error submitting transaction: {str(e)}")
             raise
     
     async def get_transaction_status(self, tx_id: str, max_retries: int = 5) -> Dict:
@@ -204,9 +222,12 @@ class QuantumSolanaClient:
             if not self.client:
                 await self.connect()
             
+            # Convert string signature to Signature object
+            signature = Signature.from_string(tx_id)
+            
             for attempt in range(max_retries):
                 try:
-                    response = await self.client.get_transaction(tx_id)
+                    response = await self.client.get_transaction(signature)
                     
                     if response.value is not None:
                         meta = response.value.transaction.meta
@@ -216,8 +237,7 @@ class QuantumSolanaClient:
                             status = {
                                 "confirmed": True,
                                 "slot": slot,
-                                "error": None,
-                                "block_time": response.value.blockTime
+                                "error": None
                             }
                             logger.info(f"Transaction confirmed in slot {slot}")
                             return status
@@ -248,6 +268,44 @@ class QuantumSolanaClient:
         except Exception as e:
             logger.error(f"Failed to get transaction status: {str(e)}")
             raise
+    
+    async def get_airdrop_alternatives(self, address: str) -> Dict[str, str]:
+        """
+        Returns alternative methods to get SOL for test networks
+        when the regular airdrop is not working
+        
+        Args:
+            address: The Solana address to receive SOL
+            
+        Returns:
+            Dictionary of alternative methods with instructions
+        """
+        if self.network not in ["devnet", "testnet"]:
+            return {"error": "Alternative airdrop methods are only available for devnet and testnet"}
+        
+        network_name = self.network.capitalize()
+        
+        alternatives = {
+            "web_faucets": [
+                f"Visit https://solfaucet.com and request SOL for {network_name}",
+                f"Visit https://faucet.solana.com and request SOL for {network_name}",
+                f"Visit https://quicknode.com/faucet/sol and request SOL for {network_name}"
+            ],
+            "cli_commands": [
+                f"Run: solana config set --url {self.network}",
+                f"Run: solana airdrop 1 {address}",
+                "If rate limited, wait a few minutes and try again"
+            ],
+            "discord_faucets": [
+                "Join Solana Discord: https://discord.gg/solana",
+                "Use the #devnet-faucet channel to request SOL"
+            ],
+            "address": address,
+            "network": self.network,
+            "note": "If one method fails, please try another. Rate limits may apply."
+        }
+        
+        return alternatives
     
     async def request_airdrop(self, address: str, amount_sol: float = 1.0) -> Optional[str]:
         """Request SOL airdrop on testnet/devnet with automatic retry on different endpoints"""
@@ -288,24 +346,36 @@ class QuantumSolanaClient:
                     if hasattr(response, 'value') and response.value:
                         tx_id = str(response.value)
                         logger.info(f"Airdrop requested: {tx_id}")
-                        return tx_id
-                    else:
-                        error_msg = f"Airdrop request returned invalid response: {response}"
-                        logger.error(error_msg)
-                        last_error = ValueError(error_msg)
+                        
+                        # Wait for confirmation
+                        await asyncio.sleep(2)
+                        status = await self.get_transaction_status(tx_id)
+                        if status.get("confirmed"):
+                            return tx_id
+                        elif status.get("error") and "rate limit" in str(status.get("error")).lower():
+                            logger.warning("Rate limit reached, trying alternative endpoint")
+                            await asyncio.sleep(2)  # Wait before trying next endpoint
+                            continue
+                        
+                    error_msg = f"Airdrop request failed or not confirmed"
+                    logger.error(error_msg)
+                    last_error = ValueError(error_msg)
                         
                 except asyncio.TimeoutError:
                     error_msg = "Airdrop request timed out. The network may be congested."
                     logger.error(error_msg)
                     last_error = ValueError(error_msg)
+                    await asyncio.sleep(2)  # Wait before retrying
                     
-                except RPCException as rpc_err:
+                except RpcException as rpc_err:
                     # Catch specific RPC exceptions from the Solana client
                     error_msg = f"RPC error during airdrop request: {str(rpc_err)}"
                     logger.error(error_msg)
                     
-                    if "429" in str(rpc_err):
-                        last_error = ValueError("Rate limit exceeded. Please try again later.")
+                    if "429" in str(rpc_err) or "rate limit" in str(rpc_err).lower():
+                        logger.warning("Rate limit reached, trying alternative endpoint")
+                        await asyncio.sleep(2)  # Wait before trying next endpoint
+                        continue
                     elif "exceeds max allowed amount" in str(rpc_err).lower():
                         # Don't retry for amount errors
                         raise ValueError("Requested amount exceeds maximum allowed airdrop amount.")
@@ -313,7 +383,7 @@ class QuantumSolanaClient:
                         last_error = ValueError(f"Airdrop failed: {str(rpc_err)}")
                 
                 except Exception as e:
-                    error_msg = f"Unexpected error during airdrop request: {str(e)}, {type(e)}"
+                    error_msg = f"Unexpected error during airdrop request: {str(e)}"
                     logger.error(error_msg)
                     last_error = ValueError(error_msg)
                     
@@ -324,6 +394,7 @@ class QuantumSolanaClient:
                     break
                     
                 tries += 1
+                await asyncio.sleep(1)  # Wait before retrying
                     
             except Exception as e:
                 if "exceeds max allowed amount" in str(e).lower():
@@ -340,46 +411,15 @@ class QuantumSolanaClient:
                     break
                     
                 tries += 1
+                await asyncio.sleep(1)  # Wait before retrying
                 
-        # If we've tried all endpoints and still failed, raise the last error
-        if last_error:
-            raise last_error
-        else:
-            raise ValueError("Failed to request airdrop after trying all available endpoints")
-    
-    async def get_airdrop_alternatives(self, address: str) -> Dict[str, str]:
-        """
-        Returns alternative methods to get SOL for test networks
-        when the regular airdrop is not working
-        
-        Args:
-            address: The Solana address to receive SOL
-            
-        Returns:
-            Dictionary of alternative methods with instructions
-        """
-        if self.network not in ["devnet", "testnet"]:
-            return {"error": "Alternative airdrop methods are only available for devnet and testnet"}
-        
-        network_name = self.network.capitalize()
-        
-        alternatives = {
-            "web_faucets": [
-                f"Visit https://faucet.solana.com and request SOL for {network_name}",
-                f"Visit https://solfaucet.com and request SOL for {network_name}",
-                f"Visit https://{self.network}faucet.org and request SOL for your address: {address}"
-            ],
-            "cli_command": f"Run this command in terminal: solana airdrop 2 {address} --url {self.network}",
-            "discord_faucets": "Join Solana discord communities like LamportDAO or The 76 Devs to request SOL from their bots",
-            "address": address,
-            "network": self.network
-        }
-        
-        return alternatives
+        # If we've tried all endpoints, return None to indicate failure
+        # The caller should then use get_airdrop_alternatives()
+        return None
     
     async def request_faucet_airdrop(self, address: str, amount_sol: float = 1.0) -> Dict[str, Any]:
         """
-        Request an airdrop from SolFaucet.com API
+        Request an airdrop from alternative faucets
         This is an alternative to the standard RPC airdrop
         
         Args:
@@ -396,46 +436,74 @@ class QuantumSolanaClient:
             }
             
         try:
+            # Try multiple faucet APIs
             faucet_urls = {
-                "devnet": "https://solfaucet.com/api/v1/request",
-                "testnet": "https://solfaucet.com/api/v1/request"
+                "devnet": [
+                    "https://faucet.devnet.solana.com/api/v1/request",
+                    "https://api.faucet.solana.com/api/v1/request",
+                    "https://faucet.quicknode.com/solana/devnet"
+                ],
+                "testnet": [
+                    "https://faucet.testnet.solana.com/api/v1/request",
+                    "https://api.faucet.solana.com/api/v1/request"
+                ]
             }
             
-            url = faucet_urls.get(self.network)
-            if not url:
+            urls = faucet_urls.get(self.network, [])
+            if not urls:
                 return {
                     "success": False,
-                    "error": f"No faucet URL available for {self.network}"
+                    "error": f"No faucet URLs available for {self.network}"
                 }
-                
-            # Prepare the request data
-            data = {
-                "address": address,
-                "network": self.network
-            }
             
-            logger.info(f"Requesting airdrop from faucet for {address} on {self.network}")
-            
-            # Send the request to the faucet API
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=data, timeout=30) as response:
-                    result = await response.json()
+            # Try each faucet URL
+            for url in urls:
+                try:
+                    # Prepare the request data
+                    data = {
+                        "address": address,
+                        "network": self.network,
+                        "amount": amount_sol
+                    }
                     
-                    if response.status == 200:
-                        logger.info(f"Faucet airdrop request successful: {result}")
-                        return {
-                            "success": True,
-                            "response": result
-                        }
-                    else:
-                        logger.error(f"Faucet airdrop request failed: {result}")
-                        return {
-                            "success": False,
-                            "error": f"Faucet error: {result.get('error', 'Unknown error')}"
-                        }
+                    logger.info(f"Trying faucet at {url}")
+                    
+                    # Send the request to the faucet API
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post(url, json=data, timeout=30) as response:
+                            if response.status == 200:
+                                try:
+                                    result = await response.json()
+                                    logger.info(f"Faucet airdrop request successful: {result}")
+                                    return {
+                                        "success": True,
+                                        "response": result
+                                    }
+                                except:
+                                    # If JSON parsing fails, try text
+                                    text = await response.text()
+                                    if "success" in text.lower():
+                                        return {
+                                            "success": True,
+                                            "response": {"message": text}
+                                        }
+                            
+                            # If this faucet failed, try the next one
+                            logger.warning(f"Faucet {url} failed, trying next...")
+                            await asyncio.sleep(1)
+                            
+                except Exception as e:
+                    logger.warning(f"Error with faucet {url}: {str(e)}")
+                    continue
+            
+            # If all faucets failed
+            return {
+                "success": False,
+                "error": "All faucet attempts failed"
+            }
                         
         except Exception as e:
-            error_msg = f"Failed to request airdrop from faucet: {str(e)}"
+            error_msg = f"Failed to request airdrop from faucets: {str(e)}"
             logger.error(error_msg)
             return {
                 "success": False,

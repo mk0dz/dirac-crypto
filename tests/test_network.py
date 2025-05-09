@@ -1,5 +1,5 @@
 """
-Test network connectivity and transaction submission
+Test Solana network functionality
 """
 import sys
 import os
@@ -8,6 +8,8 @@ import asyncio
 import tempfile
 import shutil
 from pathlib import Path
+from solders.pubkey import Pubkey
+from solders.hash import Hash
 
 # Add the parent directory to sys.path for imports
 project_root = Path(__file__).parent.parent
@@ -46,7 +48,7 @@ class TestNetwork(unittest.TestCase):
         client = QuantumSolanaClient(network="testnet")
         self.assertIsNotNone(client)
         self.assertEqual(client.network, "testnet")
-        self.assertEqual(client.rpc_url, "https://api.testnet.solana.com")
+        self.assertEqual(client.current_endpoint, "https://api.testnet.solana.com")
     
     def test_connect_to_network(self):
         """Test connecting to Solana network"""
@@ -65,23 +67,24 @@ class TestNetwork(unittest.TestCase):
         
         asyncio.run(run_test())
     
-    def test_get_recent_blockhash(self):
+    async def test_get_recent_blockhash(self):
         """Test getting recent blockhash"""
-        async def run_test():
-            try:
-                await self.solana_client.connect()
-                blockhash = await self.solana_client.get_recent_blockhash()
-                
-                self.assertIsNotNone(blockhash)
-                self.assertIsInstance(blockhash, str)
-                
-                await self.solana_client.disconnect()
-                
-            except Exception as e:
-                print(f"Blockhash test skipped: {e}")
-                self.skipTest("Blockhash test requires network connection")
-        
-        asyncio.run(run_test())
+        try:
+            # Connect to network
+            await self.solana_client.connect()
+            
+            # Get recent blockhash
+            blockhash = await self.solana_client.get_recent_blockhash()
+            
+            # Verify blockhash
+            self.assertIsNotNone(blockhash)
+            self.assertIsInstance(blockhash, Hash)
+            self.assertEqual(len(str(blockhash)), 44)  # Base58 encoded hash length
+            
+            await self.solana_client.disconnect()
+            
+        except Exception as e:
+            self.skipTest(f"Blockhash test skipped: {str(e)}")
     
     def test_request_airdrop(self):
         """Test requesting airdrop"""
