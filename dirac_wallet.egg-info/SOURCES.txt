@@ -12,6 +12,7 @@ dirac_wallet/cli/commands.py
 dirac_wallet/core/__init__.py
 dirac_wallet/core/address.py
 dirac_wallet/core/keys.py
+dirac_wallet/core/secure_storage.py
 dirac_wallet/core/storage.py
 dirac_wallet/core/transactions.py
 dirac_wallet/core/wallet.py
@@ -19,8 +20,12 @@ dirac_wallet/network/__init__.py
 dirac_wallet/network/solana_client.py
 dirac_wallet/utils/__init__.py
 dirac_wallet/utils/logger.py
+dirac_wallet/utils/security_validator.py
 tests/test_address.py
+tests/test_extended_security.py
 tests/test_keys.py
 tests/test_network.py
+tests/test_penetration.py
+tests/test_security.py
 tests/test_transactions.py
 tests/test_wallet.py
