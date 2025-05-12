@@ -48,11 +48,11 @@ This wallet prioritizes security over performance. Transaction operations may be
 
 Currently in development. Features:
 - ✅ Project setup
-- ⬜ Key generation
-- ⬜ Address derivation
-- ⬜ Transaction signing
-- ⬜ Network connectivity
-- ⬜ CLI interface
+- ✅ Key generation
+- ✅ Address derivation
+- ✅ Transaction signing
+- ✅ Network connectivity
+- ✅ CLI interface
 
 ## License
 
