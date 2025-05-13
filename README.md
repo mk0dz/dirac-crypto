@@ -14,6 +14,19 @@ A quantum-resistant Solana wallet using post-quantum cryptography signatures and
 - **Airdrop Support**: Request test SOL on devnet and testnet with simple commands
 - **Multi-Wallet Management**: Create and manage multiple wallets easily
 
+## Comparison with Traditional Wallets
+
+| Feature | Traditional Solana Wallets | Dirac-Wallet |
+|---------|---------------------------|--------------|
+| **Cryptography** | Uses ECDSA (elliptic curve) | Uses quantum-resistant CRYSTALS-Dilithium |
+| **Security Against Quantum Attacks** | Vulnerable to quantum computing attacks | Resistant to quantum computing threats |
+| **Key Generation** | Based on classical cryptography | Uses post-quantum algorithms |
+| **Future-Proofing** | May require upgrades when quantum computing advances | Already prepared for quantum era |
+| **Transaction Speed** | Standard Solana speed | Maintains Solana speed while adding quantum security |
+| **Compatibility** | Works with current Solana ecosystem | Fully compatible with Solana blockchain |
+
+While traditional wallets rely on elliptic curve cryptography that could be broken by sufficiently powerful quantum computers, Dirac-Wallet implements NIST-approved post-quantum cryptographic algorithms designed to withstand quantum attacks while maintaining compatibility with the Solana ecosystem.
+
 ## Installation
 
 ### From PyPI
