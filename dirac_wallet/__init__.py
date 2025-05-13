@@ -1,7 +1,7 @@
 """
 Dirac-Wallet: A quantum-resistant Solana wallet
 """
-__version__ = "0.1.0"
+__version__ = "0.1.3"
 __author__ = "Dirac Team"
 __description__ = "Quantum-resistant Solana wallet using quantum-inspired cryptography"
 

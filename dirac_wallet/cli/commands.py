@@ -12,8 +12,9 @@ from rich.table import Table
 from rich.panel import Panel
 from rich import box
 from solders.transaction import Transaction
+from datetime import datetime
 
-from ..core.wallet import DiracWallet
+from ..core.wallet import DiracWallet, TransactionRecord
 from ..core.transactions import QuantumTransaction
 from ..network.solana_client import QuantumSolanaClient
 from ..utils.logger import logger
@@ -59,6 +60,97 @@ def print_balance(address, balance):
     console.print(panel)
 
 
+def print_transaction_history(transactions):
+    """Print transaction history in a formatted table"""
+    table = Table(title="Transaction History", box=box.ROUNDED)
+    table.add_column("Date", style="cyan", width=10)
+    table.add_column("Type", style="cyan", width=10)
+    table.add_column("Amount", style="green", width=12)
+    table.add_column("Fee", style="red", width=10)
+    table.add_column("Status", style="yellow", width=10)
+    table.add_column("Signature", style="magenta", width=15)
+    
+    for tx in transactions:
+        # Format date
+        try:
+            date_str = tx.get('timestamp', '')
+            if date_str:
+                try:
+                    date = datetime.fromisoformat(date_str).strftime("%Y-%m-%d")
+                except (ValueError, TypeError):
+                    # If we can't parse the date, just use the first 10 chars
+                    date = date_str[:10] if len(date_str) >= 10 else date_str
+            else:
+                date = "Unknown"
+        except Exception:
+            date = "Unknown"
+            
+        # Format amount with + or - prefix
+        try:
+            amount = float(tx.get('amount', 0.0))
+            amount_str = f"{amount:.6f}"
+        except (ValueError, TypeError):
+            amount_str = "0.000000"
+            
+        # Add +/- prefix based on transaction direction
+        try:
+            sender = tx.get('sender', '')
+            recipient = tx.get('recipient', '')
+            wallet_address = tx.get('wallet_address', '')
+            
+            # If wallet address not provided, use the current display context
+            if not wallet_address and sender == recipient:
+                # Self-transfer
+                amount_str = f"{amount_str}"
+            elif not wallet_address:
+                # Assume outgoing by default
+                amount_str = f"-{amount_str}"
+            elif sender == wallet_address and recipient != wallet_address:
+                # Outgoing transaction
+                amount_str = f"-{amount_str}"
+            elif recipient == wallet_address and sender != wallet_address:
+                # Incoming transaction
+                amount_str = f"+{amount_str}"
+            else:
+                # Neutral (like self-transfer)
+                amount_str = f"{amount_str}"
+        except Exception:
+            # Keep the amount as is if we can't determine direction
+            pass
+                
+        # Format signature to be shorter
+        try:
+            sig = str(tx.get('signature', ''))
+            if len(sig) > 12:
+                sig = f"{sig[:6]}...{sig[-6:]}"
+        except Exception:
+            sig = "Unknown"
+            
+        # Format fee
+        try:
+            fee = float(tx.get('fee', 0.0))
+            fee_str = f"{fee:.6f}"
+        except (ValueError, TypeError):
+            fee_str = "0.000000"
+            
+        # Get transaction type
+        tx_type = str(tx.get('type', 'unknown'))
+        
+        # Get status
+        status = str(tx.get('status', 'unknown'))
+        
+        table.add_row(
+            date,
+            tx_type,
+            amount_str,
+            fee_str,
+            status,
+            sig
+        )
+    
+    console.print(table)
+
+
 def get_password(prompt="Enter wallet password"):
     """Get password from user without echoing"""
     import getpass
@@ -73,7 +165,7 @@ def cli():
 
 
 @cli.command()
-@click.option('--network', '-n', default='testnet', type=click.Choice(['testnet', 'devnet', 'mainnet']), 
+@click.option('--network', '-n', default='devnet', type=click.Choice(['testnet', 'devnet', 'mainnet']), 
               help='Solana network to use')
 @click.option('--path', '-p', help='Path to save wallet file')
 @click.argument('name', required=True)
@@ -117,7 +209,7 @@ def create(network, path, name):
 
 @cli.command()
 @click.option('--path', '-p', help='Path to wallet file')
-@click.option('--network', '-n', default='testnet', type=click.Choice(['testnet', 'devnet', 'mainnet']), 
+@click.option('--network', '-n', default='devnet', type=click.Choice(['testnet', 'devnet', 'mainnet']), 
               help='Solana network to use')
 @click.argument('name', required=True)
 def balance(path, network, name):
@@ -163,7 +255,7 @@ def balance(path, network, name):
 
 @cli.command()
 @click.option('--path', '-p', help='Path to wallet file')
-@click.option('--network', '-n', default='testnet', type=click.Choice(['testnet', 'devnet', 'mainnet']), 
+@click.option('--network', '-n', default='devnet', type=click.Choice(['testnet', 'devnet', 'mainnet']), 
               help='Solana network to use')
 @click.argument('name', required=True)
 def info(path, network, name):
@@ -192,7 +284,7 @@ def info(path, network, name):
 
 @cli.command()
 @click.option('--path', '-p', help='Path to wallet file')
-@click.option('--network', '-n', default='testnet', type=click.Choice(['testnet', 'devnet', 'mainnet']), 
+@click.option('--network', '-n', default='devnet', type=click.Choice(['testnet', 'devnet', 'mainnet']), 
               help='Solana network to use')
 @click.argument('name', required=True)
 @click.argument('recipient', required=True)
@@ -257,8 +349,10 @@ def send(path, network, name, recipient, amount):
                         # Wait for confirmation
                         print_info("Waiting for confirmation...")
                         confirmed = False
+                        confirmation_status = None
                         for _ in range(5):  # Try for 5 attempts
                             status = await client.get_transaction_status(tx_id)
+                            confirmation_status = status
                             if status.get("confirmed"):
                                 print_success("Transaction confirmed!")
                                 confirmed = True
@@ -275,6 +369,27 @@ def send(path, network, name, recipient, amount):
                         # Show final balance
                         new_balance = await client.get_balance(wallet.solana_address)
                         print_info(f"New balance: {new_balance} SOL")
+                        
+                        # Record transaction in wallet history
+                        tx_record = {
+                            "signature": tx_id,
+                            "timestamp": datetime.now().isoformat(),
+                            "amount": float(amount),
+                            "sender": wallet.solana_address,
+                            "recipient": recipient,
+                            "status": "confirmed" if confirmed else "pending",
+                            "fee": 0.000005,  # Standard fee
+                            "type": "transfer",
+                            "memo": None
+                        }
+                        wallet.add_transaction(tx_record)
+                        wallet.save(password)
+                        
+                        return {
+                            "success": True,
+                            "tx_id": tx_id,
+                            "new_balance": new_balance
+                        }
                         
                     except Exception as e:
                         print_error(f"Failed to submit transaction: {str(e)}")
@@ -600,6 +715,98 @@ def list_wallets(network):
         else:
             console.print(table)
         
+    except Exception as e:
+        print_error(f"Error: {str(e)}")
+
+
+@cli.command()
+@click.option('--path', '-p', help='Path to wallet file')
+@click.option('--network', '-n', default='devnet', type=click.Choice(['testnet', 'devnet', 'mainnet']), 
+              help='Solana network to use')
+@click.option('--limit', '-l', type=int, default=10, help='Maximum number of transactions to show')
+@click.option('--refresh', '-r', is_flag=True, help='Refresh transaction history from network')
+@click.argument('name', required=True)
+def history(path, network, limit, refresh, name):
+    """Show transaction history for wallet"""
+    try:
+        if not path:
+            wallet_path = Path.home() / ".dirac_wallet" / f"{name}_{network}.dwf"
+            path = wallet_path
+        if not Path(path).exists():
+            print_error(f"Wallet not found at {path}")
+            print_info(f"Create or import a wallet for '{name}' on network '{network}'")
+            return
+        
+        wallet = DiracWallet(str(path), network=network)
+        password = get_password()
+        
+        if wallet.unlock(password):
+            # Get transaction history from wallet
+            transactions = wallet.get_transaction_history()
+            
+            # If refresh flag is set, get transactions from network
+            if refresh:
+                print_info("Refreshing transaction history from network...")
+                
+                async def fetch_transactions():
+                    client = QuantumSolanaClient(network=network)
+                    try:
+                        await client.connect()
+                        # Get recent transactions for the address
+                        new_txs = await client.get_transaction_history(wallet.solana_address)
+                        return new_txs
+                    except Exception as e:
+                        return {"error": str(e)}
+                    finally:
+                        await client.disconnect()
+                
+                network_txs = asyncio.run(fetch_transactions())
+                
+                if isinstance(network_txs, dict) and "error" in network_txs:
+                    print_error(f"Failed to refresh transactions: {network_txs['error']}")
+                else:
+                    # Add new transactions to wallet history
+                    added_count = 0
+                    for tx in network_txs:
+                        try:
+                            # Clean the transaction data to match TransactionRecord format
+                            # Remove any fields not in the TransactionRecord model
+                            if 'wallet_address' in tx:
+                                del tx['wallet_address']
+                                
+                            # Ensure all required fields are present
+                            if 'signature' not in tx or not tx['signature']:
+                                continue
+                                
+                            # Add transaction to wallet history
+                            wallet.add_transaction(tx)
+                            added_count += 1
+                        except Exception as e:
+                            print_error(f"Error processing transaction: {str(e)}")
+                    
+                    # Save updated wallet
+                    wallet.save(password)
+                    
+                    print_success(f"Added {added_count} transactions from network")
+                    
+                    # Get updated transaction list
+                    transactions = wallet.get_transaction_history()
+            
+            # Sort transactions by timestamp (newest first)
+            transactions.sort(key=lambda tx: tx.get('timestamp', ''), reverse=True)
+            
+            # Limit to requested number
+            transactions = transactions[:limit]
+            
+            if transactions:
+                print_transaction_history(transactions)
+            else:
+                print_info("No transaction history found")
+                if not refresh:
+                    print_info("Use --refresh to fetch transactions from network")
+        else:
+            print_error("Failed to unlock wallet")
+            
     except Exception as e:
         print_error(f"Error: {str(e)}")
 

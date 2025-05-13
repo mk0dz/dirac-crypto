@@ -4,7 +4,7 @@
 
 ```bash
 # Create a wallet on testnet
-dirac-wallet create
+dirac-wallet create 'name'
 
 # Create a wallet on devnet
 dirac-wallet create --network devnet

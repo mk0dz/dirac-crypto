@@ -1,0 +1,20 @@
+include LICENSE
+include readme.md
+include QUICK-START.md
+include pyproject.toml
+include requirements.txt
+include project-structure.md
+
+recursive-include config *.yaml *.json
+recursive-include dirac_wallet *.py
+recursive-include tests *.py
+
+prune env
+prune venv
+prune .git
+prune frontend
+prune benchmark_results
+prune __pycache__
+prune *.egg-info
+prune .vscode
+prune .idea 

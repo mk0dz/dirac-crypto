@@ -5,7 +5,7 @@ import os
 import json
 import getpass
 from pathlib import Path
-from typing import Optional, Dict, Union
+from typing import Optional, Dict, Union, List
 from dataclasses import dataclass, asdict
 from solders.signature import Signature
 
@@ -22,8 +22,8 @@ class WalletInfo:
     algorithm: str
     security_level: int
     created_at: str
-    version: str = "0.1.0"
-    network: str = "testnet"
+    version: str = "0.1.3"
+    network: str = "devnet"
     
     def to_dict(self) -> Dict:
         return asdict(self)
@@ -33,10 +33,31 @@ class WalletInfo:
         return cls(**data)
 
 
+@dataclass
+class TransactionRecord:
+    """Container for transaction history records"""
+    signature: str
+    timestamp: str
+    amount: float
+    sender: str
+    recipient: str
+    status: str
+    fee: float = 0.000005
+    type: str = "transfer"
+    memo: Optional[str] = None
+    
+    def to_dict(self) -> Dict:
+        return asdict(self)
+    
+    @classmethod
+    def from_dict(cls, data: Dict) -> 'TransactionRecord':
+        return cls(**data)
+
+
 class DiracWallet:
     """Main wallet class for Dirac-Wallet"""
     
-    def __init__(self, wallet_path: str = None, network: str = "testnet"):
+    def __init__(self, wallet_path: str = None, network: str = "devnet"):
         """Initialize wallet"""
         self.network = network
         self.wallet_path = Path(wallet_path) if wallet_path else self._get_default_path()
@@ -49,6 +70,7 @@ class DiracWallet:
         self.wallet_info: Optional[WalletInfo] = None
         self.solana_address: Optional[str] = None
         self.is_unlocked: bool = False
+        self.transaction_history: List[TransactionRecord] = []
         
         logger.info(f"Initialized DiracWallet for {network}")
     
@@ -86,6 +108,9 @@ class DiracWallet:
                 created_at=datetime.now().isoformat(),
                 network=self.network
             )
+            
+            # Initialize empty transaction history
+            self.transaction_history = []
             
             # Save wallet
             self._save_encrypted(password)
@@ -127,6 +152,14 @@ class DiracWallet:
             self.keypair = KeyPair.deserialize(wallet_data["keypair"])
             self.wallet_info = WalletInfo.from_dict(wallet_data["info"])
             
+            # Load transaction history if available
+            if "transaction_history" in wallet_data:
+                self.transaction_history = [
+                    TransactionRecord.from_dict(tx) for tx in wallet_data["transaction_history"]
+                ]
+            else:
+                self.transaction_history = []
+            
             # Recreate Solana keypair
             hybrid_keypair = AddressDerivation.create_quantum_keypair(self.keypair)
             self.solana_keypair = hybrid_keypair["solana_keypair"]
@@ -164,7 +197,8 @@ class DiracWallet:
             # Prepare wallet data
             wallet_data = {
                 "keypair": self.keypair.serialize(),
-                "info": self.wallet_info.to_dict()
+                "info": self.wallet_info.to_dict(),
+                "transaction_history": [tx.to_dict() for tx in self.transaction_history]
             }
             
             # Encrypt and save
@@ -194,6 +228,37 @@ class DiracWallet:
         info["is_unlocked"] = self.is_unlocked
         info["path"] = str(self.wallet_path)
         return info
+    
+    def add_transaction(self, tx_record: Union[TransactionRecord, Dict]) -> None:
+        """Add a transaction to the wallet's history"""
+        if not self.is_unlocked:
+            raise ValueError("Wallet must be unlocked to add transactions")
+            
+        if isinstance(tx_record, dict):
+            transaction = TransactionRecord.from_dict(tx_record)
+        else:
+            transaction = tx_record
+            
+        self.transaction_history.append(transaction)
+        logger.info(f"Added transaction {transaction.signature[:8]}... to history")
+    
+    def get_transaction_history(self) -> List[Dict]:
+        """Get the wallet's transaction history"""
+        if not self.is_unlocked:
+            raise ValueError("Wallet must be unlocked to access transaction history")
+            
+        return [tx.to_dict() for tx in self.transaction_history]
+    
+    def save(self, password: str = None):
+        """Save the wallet with current state"""
+        if not self.is_unlocked:
+            raise ValueError("Wallet must be unlocked to save")
+            
+        if password is None:
+            raise ValueError("Password required to save wallet")
+            
+        self._save_encrypted(password)
+        logger.info("Wallet saved successfully")
     
     def sign_message(self, message: Union[str, bytes]) -> Dict:
         """Sign a message with the wallet's private key"""

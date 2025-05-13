@@ -509,3 +509,178 @@ class QuantumSolanaClient:
                 "success": False,
                 "error": error_msg
             }
+    
+    async def get_transaction_history(self, address: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """Fetch transaction history for an address"""
+        try:
+            if not self.client:
+                await self.connect()
+            
+            # Convert string address to Pubkey
+            pubkey = Pubkey.from_string(address)
+            
+            # Get signatures for address (most recent first)
+            response = await self.client.get_signatures_for_address(
+                pubkey, 
+                limit=limit
+            )
+            
+            if not response.value:
+                logger.info(f"No transaction history found for {address}")
+                return []
+                
+            logger.info(f"Found {len(response.value)} transactions for {address}")
+            
+            # Process each transaction
+            transactions = []
+            for sig_info in response.value:
+                signature = sig_info.signature
+                
+                try:
+                    # Get transaction details
+                    tx_response = await self.client.get_transaction(
+                        signature, 
+                        max_supported_transaction_version=0
+                    )
+                    
+                    if not tx_response.value:
+                        logger.warning(f"Transaction {signature} details not found")
+                        continue
+                    
+                    # Extract transaction data
+                    tx_data = tx_response.value
+                    
+                    # The object structure may vary depending on Solders version
+                    # First, try to extract using the enhanced transaction structure
+                    try:
+                        # For newer Solders versions
+                        meta = tx_data.meta
+                        transaction = tx_data.transaction
+                        fee = meta.fee / 1_000_000_000 if hasattr(meta, 'fee') else 0.000005
+                        status = "confirmed" if getattr(meta, 'status', None) and meta.status.Ok is not None else "failed"
+                    except (AttributeError, TypeError):
+                        # For older or different structure
+                        if hasattr(tx_data, 'transaction'):
+                            transaction = tx_data.transaction
+                            # Try to access transaction.meta
+                            if hasattr(transaction, 'meta'):
+                                meta = transaction.meta
+                                fee = meta.fee / 1_000_000_000 if hasattr(meta, 'fee') else 0.000005
+                                status = "confirmed"
+                            # Handle EncodedConfirmedTransactionWithStatusMeta structure
+                            elif hasattr(tx_data, 'meta'):
+                                meta = tx_data.meta
+                                fee = 0.000005  # Default fee if not available
+                                status = "confirmed"
+                            else:
+                                # If we can't find meta, use defaults
+                                meta = None
+                                fee = 0.000005
+                                status = "confirmed"
+                        else:
+                            # If we can't find transaction, skip this entry
+                            logger.warning(f"Unknown transaction structure for {signature}")
+                            continue
+                    
+                    # Extract timestamp
+                    timestamp = None
+                    if hasattr(tx_data, 'block_time') and tx_data.block_time is not None:
+                        timestamp = datetime.fromtimestamp(tx_data.block_time).isoformat()
+                    else:
+                        # Use signature confirm time from signature info
+                        timestamp = datetime.fromtimestamp(sig_info.block_time).isoformat() if hasattr(sig_info, 'block_time') and sig_info.block_time else datetime.now().isoformat()
+                    
+                    # Try to determine amount, sender and recipient
+                    amount = 0
+                    sender = None
+                    recipient = None
+                    tx_type = "unknown"
+                    
+                    # Try to extract account keys and instructions
+                    try:
+                        if hasattr(transaction, 'message') and hasattr(transaction.message, 'account_keys'):
+                            account_keys = transaction.message.account_keys
+                            if hasattr(transaction.message, 'instructions'):
+                                instructions = transaction.message.instructions
+                                
+                                # Check for SOL transfers (system program)
+                                for inst in instructions:
+                                    try:
+                                        if hasattr(inst, 'program_id_index'):
+                                            program_id_index = inst.program_id_index
+                                            if program_id_index < len(account_keys):
+                                                program_id = str(account_keys[program_id_index])
+                                                
+                                                # System program transfers
+                                                if program_id == "11111111111111111111111111111111":
+                                                    tx_type = "transfer"
+                                                    
+                                                    # Try to extract accounts from instruction
+                                                    if hasattr(inst, 'accounts') and len(inst.accounts) >= 2:
+                                                        sender_idx = inst.accounts[0]
+                                                        recipient_idx = inst.accounts[1]
+                                                        
+                                                        if sender_idx < len(account_keys) and recipient_idx < len(account_keys):
+                                                            sender = str(account_keys[sender_idx])
+                                                            recipient = str(account_keys[recipient_idx])
+                                                            
+                                                            # Try to extract amount from pre/post balances
+                                                            if hasattr(meta, 'pre_balances') and hasattr(meta, 'post_balances'):
+                                                                pre_balances = meta.pre_balances
+                                                                post_balances = meta.post_balances
+                                                                
+                                                                if sender_idx < len(pre_balances) and sender_idx < len(post_balances) and \
+                                                                   recipient_idx < len(pre_balances) and recipient_idx < len(post_balances):
+                                                                    pre_sender = pre_balances[sender_idx]
+                                                                    post_sender = post_balances[sender_idx]
+                                                                    pre_recipient = pre_balances[recipient_idx]
+                                                                    post_recipient = post_balances[recipient_idx]
+                                                                    
+                                                                    # Calculate amount
+                                                                    sender_change = pre_sender - post_sender
+                                                                    recipient_change = post_recipient - pre_recipient
+                                                                    
+                                                                    # Use recipient change as amount
+                                                                    if recipient_change > 0:
+                                                                        amount = recipient_change / 1_000_000_000  # Convert lamports to SOL
+                                    except Exception as inst_error:
+                                        logger.warning(f"Error processing instruction: {str(inst_error)}")
+                                        continue
+                    except Exception as tx_error:
+                        logger.warning(f"Error extracting transaction details: {str(tx_error)}")
+                    
+                    # If we still don't have sender/recipient, use fee payer and fallbacks
+                    if not sender:
+                        try:
+                            # Fee payer is usually the first account
+                            if hasattr(transaction, 'message') and hasattr(transaction.message, 'account_keys') and len(transaction.message.account_keys) > 0:
+                                sender = str(transaction.message.account_keys[0])
+                        except Exception:
+                            sender = address  # Use wallet address as fallback
+                    
+                    if not recipient:
+                        recipient = sender  # Self-transfer if no recipient identified
+                    
+                    # Create transaction record with the information we have
+                    tx_record = {
+                        "signature": str(signature),
+                        "sender": sender or address,
+                        "recipient": recipient or address,
+                        "amount": amount or 0.0,
+                        "fee": fee,
+                        "timestamp": timestamp,
+                        "status": status,
+                        "type": tx_type,
+                        "memo": None
+                    }
+                    
+                    transactions.append(tx_record)
+                except Exception as e:
+                    logger.warning(f"Error processing transaction {signature}: {str(e)}")
+                    continue
+            
+            return transactions
+                
+        except Exception as e:
+            logger.error(f"Failed to get transaction history: {str(e)}")
+            return []
