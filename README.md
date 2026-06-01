@@ -1,6 +1,16 @@
 # Dirac-Wallet
 
-A quantum-resistant Solana wallet using post-quantum cryptography signatures and key generation algorithms.
+A Solana wallet with a **post-quantum (ML-DSA) identity** and a chain-agnostic signing
+architecture.
+
+> **Honest scope.** Solana validators verify **ed25519** on-chain, so funds on Solana are
+> protected by ed25519 — *not* quantum-safe against a future quantum computer, and no
+> client wallet can change that. What Dirac-Wallet adds is a real, NIST-validated
+> **ML-DSA-65** (FIPS 204) quantum identity per account that signs an off-chain
+> *attestation* binding it to the on-chain address, plus a chain-adapter abstraction so
+> the same wallet runs with genuine on-chain PQC on a future quantum-safe chain. The PQC
+> comes from the `dirac-hashes` library (validated against NIST ACVP vectors;
+> pure-Python, research-grade — not constant-time, not for securing real funds yet).
 
 ![Dirac Logo](https://raw.githubusercontent.com/mk0dz/assest-store/8de6c656c32a6aacd0a3b1f1533d10f298f58248/solana/Group%2014.svg)
 
@@ -18,14 +28,14 @@ A quantum-resistant Solana wallet using post-quantum cryptography signatures and
 
 | Feature | Traditional Solana Wallets | Dirac-Wallet |
 |---------|---------------------------|--------------|
-| **Cryptography** | Uses ECDSA (elliptic curve) | Uses quantum-resistant CRYSTALS-Dilithium |
-| **Security Against Quantum Attacks** | Vulnerable to quantum computing attacks | Resistant to quantum computing threats |
-| **Key Generation** | Based on classical cryptography | Uses post-quantum algorithms |
-| **Future-Proofing** | May require upgrades when quantum computing advances | Already prepared for quantum era |
-| **Transaction Speed** | Standard Solana speed | Maintains Solana speed while adding quantum security |
-| **Compatibility** | Works with current Solana ecosystem | Fully compatible with Solana blockchain |
+| **On-chain signing (Solana)** | ed25519 | ed25519 (same — chain requirement) |
+| **On-chain quantum safety** | None | None on Solana (chain-level limitation) |
+| **Post-quantum identity** | None | Real ML-DSA-65 (FIPS 204), off-chain attestation |
+| **Quantum-safe encryption/auth** | None | Off-chain via the ML-DSA identity |
+| **Chain-agnostic signing** | No | Yes — adapter for a future on-chain-PQC chain |
+| **Compatibility** | Solana ecosystem | Fully compatible with Solana |
 
-While traditional wallets rely on elliptic curve cryptography that could be broken by sufficiently powerful quantum computers, Dirac-Wallet implements NIST-approved post-quantum cryptographic algorithms designed to withstand quantum attacks while maintaining compatibility with the Solana ecosystem.
+Dirac-Wallet does **not** claim to make on-chain Solana funds quantum-safe — that is impossible from a client while Solana verifies only ed25519. It adds a real, NIST-validated post-quantum identity (used off-chain today) and an architecture ready for a chain that verifies PQC on-chain. See the `dirac-hashes` project for the validated ML-KEM/ML-DSA/SLH-DSA implementations and benchmarks.
 
 ## Installation
 
@@ -107,11 +117,11 @@ dirac-wallet create mywallet --network mainnet
 
 ## Security Notes
 
-- Your private keys are encrypted with your password
+- Your keys are encrypted at rest with your password (AES-256-GCM); there is **no** recovery if forgotten
 - Always back up your wallet files (stored in `~/.dirac_wallet/` by default)
-- Keep your password secure - there is no recovery option if forgotten
-- Transaction signatures use quantum-resistant algorithms by default
-- The wallet is resistant to future quantum computing attacks
+- **On-chain Solana transactions are signed with ed25519** — quantum-safe *only* once Solana itself supports a post-quantum scheme. The ML-DSA quantum identity is an off-chain attestation/auth layer, not on-chain protection
+- The post-quantum code is **research-grade** (pure-Python, not constant-time); do not rely on it to protect mainnet funds
+- Pre-v2 wallet files (older toy-Dilithium format) are intentionally rejected — create a fresh wallet
 
 ## Development Status
 

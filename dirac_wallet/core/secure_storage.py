@@ -56,8 +56,10 @@ class SecureStorage:
         """Decrypt sensitive data"""
         try:
             decrypted = self.cipher_suite.decrypt(encrypted_data)
-            # Use utf-8 for decoding as well
-            return eval(decrypted.decode('utf-8'))  # Safe since we only store our own data
+            # ast.literal_eval safely parses the Python literal written by
+            # encrypt_data (dicts/bytes/numbers) without executing code, unlike eval().
+            import ast
+            return ast.literal_eval(decrypted.decode('utf-8'))
         except Exception as e:
             logger.error(f"Invalid password or corrupted data")
             raise ValueError("Invalid password or corrupted data") from e

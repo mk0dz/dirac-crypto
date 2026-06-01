@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="dirac-wallet",
-    version="0.1.3",
+    version="0.2.0",
     description="Quantum-resistant Solana wallet",
     long_description=long_description,
     long_description_content_type="text/markdown",
